@@ -1,0 +1,530 @@
+#!/bin/bash
+
+if ! command -v herdr >/dev/null 2>&1; then
+    echo "herdr is not installed. Run ./setup.sh or install it with: brew install herdr"
+    exit 1
+fi
+
+PROJECTS_DIR="${IDE_PROJECTS_DIR:-$HOME/projects}"
+WORKTREES_DIR="$PROJECTS_DIR/.worktrees"
+
+# ─── JSON helpers ──────────────────────────────────────────
+
+json_find_value() {
+    local json="$1"
+    local field="$2"
+    printf '%s\n' "$json" \
+        | awk -v field="$field" '
+            {
+              pattern = "\"" field "\"[[:space:]]*:[[:space:]]*\"[^\"]+\""
+              if (match($0, pattern)) {
+                value = substr($0, RSTART, RLENGTH)
+                sub("^\"" field "\"[[:space:]]*:[[:space:]]*\"", "", value)
+                sub(/"$/, "", value)
+                print value
+                exit
+              }
+            }
+          '
+}
+
+json_find_workspace_id_for_label() {
+    local json="$1"
+    local label="$2"
+    printf '%s\n' "$json" \
+        | tr '\n' ' ' \
+        | sed 's/},{/}\
+{/g' \
+        | awk -v label="$label" '
+            index($0, "\"label\"") && index($0, "\"" label "\"") {
+              if (match($0, /"workspace_id"[[:space:]]*:[[:space:]]*"[^"]+"/)) {
+                workspace_id = substr($0, RSTART, RLENGTH)
+                sub(/^"workspace_id"[[:space:]]*:[[:space:]]*"/, "", workspace_id)
+                sub(/"$/, "", workspace_id)
+                print workspace_id
+                exit
+              }
+            }
+          '
+}
+
+json_find_worktree_path_for_branch() {
+    local json="$1"
+    local branch="$2"
+    printf '%s\n' "$json" \
+        | tr '\n' ' ' \
+        | sed 's/},{/}\
+{/g' \
+        | awk -v branch="$branch" '
+            index($0, "\"branch\":\"" branch "\"") {
+                if (match($0, /"path":"[^"]+"/)) {
+                    val = substr($0, RSTART, RLENGTH)
+                    sub(/^"path":"/, "", val)
+                    sub(/"$/, "", val)
+                    print val
+                    exit
+                }
+            }
+          '
+}
+
+# ─── Helpers ───────────────────────────────────────────────
+
+ensure_herdr_server() {
+    if herdr status server >/dev/null 2>&1; then
+        return 0
+    fi
+    herdr server >/tmp/herdr-server.log 2>&1 &
+    local i
+    for i in $(seq 1 10); do
+        sleep 0.5
+        herdr status server >/dev/null 2>&1 && return 0
+    done
+    echo "Warning: herdr server may not be ready" >&2
+}
+
+# Returns herdr workspace label for a path.
+# Uses --git-common-dir so worktrees get the same repo name as the main checkout.
+compute_label() {
+    local path="$1"
+    local git_common_dir repo_name dir_name label
+    git_common_dir=$(git -C "$path" rev-parse --git-common-dir 2>/dev/null || true)
+    if [[ -z "$git_common_dir" ]]; then
+        label=$(basename "$path" | tr '.' '_' | tr ':' '_')
+        printf '%s\n' "$label"
+        return
+    fi
+    if [[ "$git_common_dir" == ".git" ]]; then
+        repo_name=$(basename "$path")
+    else
+        repo_name=$(basename "$(dirname "$git_common_dir")")
+    fi
+    dir_name=$(basename "$path")
+    if [[ "$dir_name" == "$repo_name" ]]; then
+        label="$repo_name"
+    else
+        label="${repo_name}_${dir_name}"
+    fi
+    label="${label//./_}"
+    label="${label//:/_}"
+    printf '%s\n' "$label"
+}
+
+make_slug() {
+    local input="$1"
+    local max_len="${2:-30}"
+    local slug
+    slug=$(printf '%s' "$input" \
+        | LC_ALL=C tr '[:upper:]' '[:lower:]' \
+        | LC_ALL=C tr -cs 'a-z0-9' '-' \
+        | sed 's/^-*//; s/-*$//')
+    slug="${slug:0:$max_len}"
+    slug="${slug%-}"
+    if [[ ${#slug} -lt 2 ]]; then
+        slug="task-$(date +%H%M%S)"
+    fi
+    printf '%s\n' "$slug"
+}
+
+make_branch_slug() {
+    local branch="$1"
+    printf '%s' "$branch" \
+        | tr '/' '-' \
+        | tr -d '~^:?*[\\' \
+        | sed 's/\.\./-/g; s/^-*//; s/-*$//'
+}
+
+detect_project() {
+    local project_arg="${1:-}"
+    local git_root=""
+
+    if [[ -n "$project_arg" ]]; then
+        git_root=$(cd "$project_arg" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
+        if [[ -z "$git_root" ]]; then
+            echo "Not a git repo: $project_arg" >&2
+            return 1
+        fi
+    else
+        git_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    fi
+
+    if [[ -z "$git_root" ]]; then
+        local project_path
+        project_path=$(find "$PROJECTS_DIR" -maxdepth 3 -name ".git" 2>/dev/null \
+            | xargs -n1 dirname 2>/dev/null \
+            | grep -v '\.worktrees' \
+            | sort -u \
+            | fzf --prompt="Project > ")
+        if [[ -z "$project_path" ]]; then
+            echo "No project selected" >&2
+            return 1
+        fi
+        git_root=$(cd "$project_path" && git rev-parse --show-toplevel 2>/dev/null)
+    fi
+
+    printf '%s\n' "$git_root"
+}
+
+focus_or_create_workspace() {
+    local label="$1"
+    local cwd="$2"
+    local workspace_id list_output create_output
+
+    list_output=$(herdr workspace list 2>/dev/null || true)
+    workspace_id=$(json_find_workspace_id_for_label "$list_output" "$label")
+
+    if [[ -n "$workspace_id" ]]; then
+        herdr workspace focus "$workspace_id" >/dev/null 2>&1 || true
+        echo "$workspace_id existing"
+        return 0
+    fi
+
+    create_output=$(herdr workspace create --cwd "$cwd" --label "$label" --focus 2>/dev/null || true)
+    workspace_id=$(json_find_value "$create_output" "workspace_id")
+    echo "$workspace_id created"
+}
+
+# Start nvim in workspace's first terminal pane and optionally split for an agent.
+# Args: workspace_id, is_new, cwd, has_agent
+# Stdout: agent pane_id when has_agent=true and pane split succeeded
+start_nvim_if_possible() {
+    local workspace_id="$1"
+    local is_new="${2:-false}"
+    local cwd="${3:-}"
+    local has_agent="${4:-false}"
+
+    if [[ -z "$workspace_id" ]]; then
+        return 0
+    fi
+
+    local pane_output pane_id pane_text
+    pane_output=$(herdr pane list --workspace "$workspace_id" 2>/dev/null || true)
+
+    # Select first terminal pane — skip agent panes (they have an "agent" key)
+    pane_id=$(printf '%s\n' "$pane_output" \
+        | tr '\n' ' ' \
+        | sed 's/},{/}\
+{/g' \
+        | awk '
+            {
+                if (index($0, "\"agent\":")) next
+                if (match($0, /"pane_id"[[:space:]]*:[[:space:]]*"[^"]+"/)) {
+                    val = substr($0, RSTART, RLENGTH)
+                    sub(/^"pane_id"[[:space:]]*:[[:space:]]*"/, "", val)
+                    sub(/"$/, "", val)
+                    print val
+                    exit
+                }
+            }
+          ')
+
+    if [[ -z "$pane_id" ]]; then
+        pane_id=$(json_find_value "$pane_output" "pane_id")
+    fi
+
+    if [[ -z "$pane_id" ]]; then
+        return 0
+    fi
+
+    pane_text=$(herdr pane read "$pane_id" --source recent-unwrapped --lines 1 --format text 2>/dev/null || true)
+    if ! printf '%s\n' "$pane_text" | grep -Eq "NVIM_IDE=1 nvim|nvim|NEOVIM"; then
+        herdr pane run "$pane_id" "NVIM_IDE=1 nvim" >/dev/null 2>&1 || true
+    fi
+
+    # Only split on new workspaces to avoid duplicating panes on re-attach
+    if [[ "$is_new" == "true" ]]; then
+        # Orca layout: agent gets 65%, nvim gets 35%
+        # No-agent layout: nvim gets 65%, terminal gets 35%
+        local right_ratio=0.65
+        [[ "$has_agent" == "true" ]] && right_ratio=0.35
+
+        local right_pane_id=""
+        if [[ "$has_agent" == "true" ]]; then
+            # Snapshot pane list before split to identify the new pane afterward
+            local before_panes
+            before_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
+                | grep -o '"pane_id":"[^"]*"' | sort)
+
+            herdr pane split "$pane_id" \
+                --direction right --ratio "$right_ratio" \
+                --cwd "$cwd" --no-focus >/dev/null 2>&1 || true
+
+            local after_panes
+            after_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
+                | grep -o '"pane_id":"[^"]*"' | sort)
+
+            right_pane_id=$(comm -13 \
+                <(printf '%s\n' "$before_panes") \
+                <(printf '%s\n' "$after_panes") \
+                | grep -o '"[^"]*"$' | tr -d '"' | head -1)
+        else
+            herdr pane split "$pane_id" \
+                --direction right --ratio "$right_ratio" \
+                --cwd "$cwd" --no-focus >/dev/null 2>&1 || true
+        fi
+
+        # No-agent mode: add terminal below nvim (VSCode style)
+        # Agent mode: skip — agent pane IS the terminal (Orca style, 2-pane)
+        if [[ "$has_agent" != "true" ]]; then
+            herdr pane split "$pane_id" \
+                --direction down --ratio 0.6 \
+                --cwd "$cwd" --no-focus >/dev/null 2>&1 || true
+        fi
+
+        if [[ "$has_agent" == "true" && -n "$right_pane_id" ]]; then
+            printf '%s\n' "$right_pane_id"
+        fi
+    fi
+}
+
+# Start claude in an existing pane.
+start_agent() {
+    local pane_id="$1"
+    [[ -z "$pane_id" ]] && return 0
+    herdr pane run "$pane_id" "claude" >/dev/null 2>&1 || true
+    printf '%s\n' "$pane_id"
+}
+
+# ─── Subcommands ───────────────────────────────────────────
+
+cmd_worktree() {
+    local branch="" project_arg="" agent_flag=true  # default: agent on
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project)  project_arg="$2"; shift 2 ;;
+            --agent)    agent_flag=true;  shift   ;;
+            --no-agent) agent_flag=false; shift   ;;
+            -*)
+                echo "Unknown flag: $1" >&2
+                echo "Usage: copse worktree <branch> [--project PATH] [--no-agent]" >&2
+                exit 1
+                ;;
+            *) branch="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$branch" ]]; then
+        echo "Usage: copse worktree <branch-name> [--project PATH] [--no-agent]" >&2
+        exit 1
+    fi
+
+    local git_root repo_name branch_slug worktree_path label
+    git_root=$(detect_project "$project_arg") || exit 1
+    repo_name=$(basename "$git_root")
+    branch_slug=$(make_branch_slug "$branch")
+    label="${repo_name}_${branch_slug}"
+    label="${label//./_}"; label="${label//:/_}"
+
+    local worktree_list existing_path open_json open_state workspace_id
+    worktree_list=$(herdr worktree list --cwd "$git_root" --json 2>/dev/null || true)
+    existing_path=$(json_find_worktree_path_for_branch "$worktree_list" "$branch")
+
+    if [[ -n "$existing_path" ]]; then
+        worktree_path="$existing_path"
+        # Recompute label from actual path (may differ from branch-derived slug)
+        label=$(compute_label "$worktree_path")
+        open_json=$(herdr worktree open \
+            --cwd "$git_root" \
+            --path "$worktree_path" \
+            --label "$label" \
+            --focus \
+            --json 2>/dev/null || true)
+        if printf '%s\n' "$open_json" | grep -q '"already_open":true'; then
+            open_state="existing"
+        else
+            open_state="created"
+        fi
+    else
+        worktree_path="$WORKTREES_DIR/$repo_name/$branch_slug"
+        mkdir -p "$WORKTREES_DIR/$repo_name"
+        open_json=$(herdr worktree create \
+            --cwd "$git_root" \
+            --branch "$branch" \
+            --path "$worktree_path" \
+            --label "$label" \
+            --focus \
+            --json 2>/dev/null || true)
+        open_state="created"
+    fi
+
+    workspace_id=$(json_find_value "$open_json" "workspace_id")
+
+    if [[ -z "$workspace_id" ]]; then
+        echo "Error: failed to open/create worktree for $branch" >&2
+        exit 1
+    fi
+
+    local is_new="false"
+    [[ "$open_state" == "created" ]] && is_new="true"
+
+    if [[ "$agent_flag" == true ]]; then
+        local agent_pane_id
+        agent_pane_id=$(start_nvim_if_possible "$workspace_id" "$is_new" "$worktree_path" "true")
+        start_agent "$agent_pane_id"
+    else
+        start_nvim_if_possible "$workspace_id" "$is_new" "$worktree_path" "false"
+    fi
+
+    exec herdr
+}
+
+cmd_fan() {
+    local task="" count=3 project_arg=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --count)   count="$2";       shift 2 ;;
+            --project) project_arg="$2"; shift 2 ;;
+            -*)
+                echo "Unknown flag: $1" >&2
+                echo "Usage: copse fan \"<task>\" [--count N] [--project PATH]" >&2
+                exit 1
+                ;;
+            *) task="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$task" ]]; then
+        echo "Usage: copse fan \"<task>\" [--count N] [--project PATH]" >&2
+        exit 1
+    fi
+
+    local git_root repo_name slug
+    git_root=$(detect_project "$project_arg") || exit 1
+    repo_name=$(basename "$git_root")
+    slug=$(make_slug "$task" 30)
+
+    local -a workspace_ids=()
+    local -a worktree_paths=()
+    local -a branches=()
+
+    local i
+    for i in $(seq 1 "$count"); do
+        local branch="fan/${slug}-${i}"
+        local branch_slug="fan-${slug}-${i}"
+        local worktree_path="$WORKTREES_DIR/$repo_name/$branch_slug"
+        local label="${repo_name}_${branch_slug}"
+        label="${label//./_}"; label="${label//:/_}"
+
+        mkdir -p "$WORKTREES_DIR/$repo_name"
+
+        local create_json workspace_id
+        create_json=$(herdr worktree create \
+            --cwd "$git_root" \
+            --branch "$branch" \
+            --path "$worktree_path" \
+            --label "$label" \
+            --no-focus \
+            --json 2>/dev/null || true)
+        workspace_id=$(json_find_value "$create_json" "workspace_id")
+
+        if [[ -z "$workspace_id" ]]; then
+            echo "Warning: failed to create worktree for $branch — skipping" >&2
+            continue
+        fi
+
+        workspace_ids+=("$workspace_id")
+        worktree_paths+=("$worktree_path")
+        branches+=("$branch")
+
+        local agent_pane_id
+        agent_pane_id=$(start_nvim_if_possible "$workspace_id" "true" "$worktree_path" "true")
+
+        if [[ -n "$agent_pane_id" ]]; then
+            herdr pane run "$agent_pane_id" "claude" >/dev/null 2>&1 || true
+            herdr agent wait "$agent_pane_id" \
+                --status idle --timeout 30000 >/dev/null 2>&1 || true
+            herdr pane run "$agent_pane_id" "$task" >/dev/null 2>&1 || true
+        else
+            echo "Warning: no agent pane for workspace $workspace_id" >&2
+        fi
+    done
+
+    if [[ ${#workspace_ids[@]} -gt 0 ]]; then
+        herdr workspace focus "${workspace_ids[0]}" >/dev/null 2>&1 || true
+    fi
+
+    echo ""
+    echo "Fan-out complete: $count agents → \"$task\""
+    printf '%-6s %-35s %s\n' "SLOT" "BRANCH" "PATH"
+    printf '%s\n' "----------------------------------------------------------------------"
+    local idx=0
+    for branch in "${branches[@]}"; do
+        printf '%-6s %-35s %s\n' \
+            "[$(( idx + 1 ))]" \
+            "$branch" \
+            "${worktree_paths[$idx]}"
+        (( idx++ )) || true
+    done
+}
+
+# ─── Entry point ───────────────────────────────────────────
+
+ensure_herdr_server
+
+case "${1:-}" in
+    worktree) shift; cmd_worktree "$@"; exit $? ;;
+    fan)      shift; cmd_fan "$@";      exit $? ;;
+esac
+
+# Parse args: copse [path] [--agent]
+ide_agent_flag=false
+selected_arg=""
+for arg in "$@"; do
+    case "$arg" in
+        --agent) ide_agent_flag=true ;;
+        --*)
+            echo "Unknown flag: $arg" >&2
+            exit 1
+            ;;
+        *) selected_arg="$arg" ;;
+    esac
+done
+
+if [[ -n "$selected_arg" ]]; then
+    selected=$(cd "$selected_arg" 2>/dev/null && pwd)
+    if [[ -z "$selected" || ! -d "$selected" ]]; then
+        echo "Directory not found: $selected_arg"
+        exit 1
+    fi
+else
+    main_repos=$(find "$PROJECTS_DIR" -maxdepth 3 -name ".git" 2>/dev/null \
+        | xargs -n1 dirname 2>/dev/null \
+        | grep -v '\.worktrees' \
+        | sort -u)
+    worktrees=$(find "$WORKTREES_DIR" -maxdepth 2 -mindepth 2 -type d 2>/dev/null \
+        | sort -u)
+
+    selected=$(
+        {
+            printf '%s\n' "$main_repos"
+            [[ -n "$worktrees" ]] && printf '[wt] %s\n' $worktrees
+        } | fzf --prompt="Project > "
+    )
+    if [[ -z "$selected" ]]; then
+        echo "No project selected"
+        exit 0
+    fi
+    selected="${selected#\[wt\] }"
+fi
+
+session_name=$(compute_label "$selected")
+
+workspace_result=$(focus_or_create_workspace "$session_name" "$selected")
+workspace_id="${workspace_result%% *}"
+workspace_state="${workspace_result#* }"
+
+if [[ "$workspace_state" == "created" || "$workspace_state" == "existing" ]]; then
+    is_new="false"
+    [[ "$workspace_state" == "created" ]] && is_new="true"
+
+    if [[ "$ide_agent_flag" == true ]]; then
+        agent_pane_id=$(start_nvim_if_possible "$workspace_id" "$is_new" "$selected" "true")
+        start_agent "$agent_pane_id"
+    else
+        start_nvim_if_possible "$workspace_id" "$is_new" "$selected" "false"
+    fi
+fi
+
+exec herdr
