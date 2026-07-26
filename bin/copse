@@ -432,10 +432,16 @@ cmd_fan() {
         agent_pane_id=$(start_nvim_if_possible "$workspace_id" "true" "$worktree_path" "true")
 
         if [[ -n "$agent_pane_id" ]]; then
-            herdr pane run "$agent_pane_id" "claude" >/dev/null 2>&1 || true
-            herdr agent wait "$agent_pane_id" \
-                --status idle --timeout 30000 >/dev/null 2>&1 || true
-            herdr pane run "$agent_pane_id" "$task" >/dev/null 2>&1 || true
+            # Pass task as CLI arg; --permission-mode overrides defaultMode:plan without
+            # writing any config files into the worktree repo.
+            # acceptEdits = auto-accept file edits; set COPSE_FAN_PERMISSION_MODE=dontAsk
+            # if the agent stalls on Bash permission prompts.
+            local fan_permission_mode escaped_task
+            fan_permission_mode="${COPSE_FAN_PERMISSION_MODE:-acceptEdits}"
+            escaped_task=$(printf '%s' "$task" | sed "s/'/'\\\\''/g")
+            herdr pane run "$agent_pane_id" \
+                "claude --permission-mode $fan_permission_mode '$escaped_task'" \
+                >/dev/null 2>&1 || true
         else
             echo "Warning: no agent pane for workspace $workspace_id" >&2
         fi
