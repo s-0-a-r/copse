@@ -197,7 +197,7 @@ start_nvim_if_possible() {
         return 0
     fi
 
-    local pane_output pane_ids pane_id pane_count pane_text
+    local pane_output pane_ids pane_id pane_count proc_info
     pane_output=$(herdr pane list --workspace "$workspace_id" 2>/dev/null || true)
 
     # Collect all terminal pane IDs — skip agent panes (they have an "agent" key)
@@ -227,8 +227,8 @@ start_nvim_if_possible() {
         return 0
     fi
 
-    pane_text=$(herdr pane read "$pane_id" --source recent-unwrapped --lines 1 --format text 2>/dev/null || true)
-    if ! printf '%s\n' "$pane_text" | grep -Eq "NVIM_IDE=1 nvim|nvim|NEOVIM"; then
+    proc_info=$(herdr pane process-info --pane "$pane_id" 2>/dev/null || true)
+    if ! printf '%s\n' "$proc_info" | grep -q '"name":"nvim"'; then
         herdr pane run "$pane_id" "NVIM_IDE=1 nvim" >/dev/null 2>&1 || true
     fi
 
