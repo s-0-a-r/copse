@@ -16,9 +16,9 @@ return {
 ██║ ╚████║███████╗╚██████╔╝ ╚████╔╝ ██║██║ ╚═╝ ██║
 ╚═╝  ╚═══╝╚══════╝ ╚═════╝   ╚═══╝  ╚═╝╚═╝     ╚═╝]],
           keys = {
-            { icon = " ", key = "f", desc = "Find File", action = ":FzfLua files" },
-            { icon = " ", key = "r", desc = "Recent Files", action = ":FzfLua oldfiles" },
-            { icon = " ", key = "g", desc = "Find Text", action = ":FzfLua live_grep" },
+            { icon = " ", key = "f", desc = "Find File", action = function() require("fzf-lua").files() end },
+            { icon = " ", key = "r", desc = "Recent Files", action = function() require("fzf-lua").oldfiles() end },
+            { icon = " ", key = "g", desc = "Find Text", action = function() require("fzf-lua").live_grep() end },
             { icon = " ", key = "q", desc = "Quit", action = ":qa" },
           },
         },
