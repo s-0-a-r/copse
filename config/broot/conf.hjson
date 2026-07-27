@@ -3,7 +3,7 @@
         {
             key: enter
             apply_to: file
-            external: "$HOME/.local/bin/copse-open {file:space-separated}"
+            external: "copse-open {file:space-separated}"
             leave_broot: false
         }
     ]
