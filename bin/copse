@@ -184,24 +184,22 @@ focus_or_create_workspace() {
     echo "$workspace_id created"
 }
 
-# Start nvim in workspace's first terminal pane and optionally split for an agent.
-# Args: workspace_id, is_new, cwd, has_agent
-# Stdout: agent pane_id when has_agent=true and pane split succeeded
-start_nvim_if_possible() {
+# Agent layout: Tab 1 = claude (left, ~80%) + yazi (right, ~20%).
+# Args: workspace_id, is_new, cwd
+# Stdout: first pane_id when is_new=true (for caller to start claude there)
+start_agent_layout() {
     local workspace_id="$1"
     local is_new="${2:-false}"
     local cwd="${3:-}"
-    local has_agent="${4:-false}"
 
-    if [[ -z "$workspace_id" ]]; then
-        return 0
-    fi
+    [[ -z "$workspace_id" ]] && return 0
+    [[ "$is_new" != "true" ]] && return 0
 
-    local pane_output pane_ids pane_id pane_count proc_info
+    local pane_output pane_id
     pane_output=$(herdr pane list --workspace "$workspace_id" 2>/dev/null || true)
 
-    # Collect all terminal pane IDs — skip agent panes (they have an "agent" key)
-    pane_ids=$(printf '%s\n' "$pane_output" \
+    # First non-agent pane
+    pane_id=$(printf '%s\n' "$pane_output" \
         | tr '\n' ' ' \
         | sed 's/},{/}\
 {/g' \
@@ -213,69 +211,34 @@ start_nvim_if_possible() {
                     sub(/^"pane_id"[[:space:]]*:[[:space:]]*"/, "", val)
                     sub(/"$/, "", val)
                     print val
+                    exit
                 }
             }
           ')
-    pane_id=$(printf '%s\n' "$pane_ids" | head -1)
-    pane_count=$(printf '%s\n' "$pane_ids" | grep -c .)
 
-    if [[ -z "$pane_id" ]]; then
-        pane_id=$(json_find_value "$pane_output" "pane_id")
-    fi
+    [[ -z "$pane_id" ]] && pane_id=$(json_find_value "$pane_output" "pane_id")
+    [[ -z "$pane_id" ]] && return 0
 
-    if [[ -z "$pane_id" ]]; then
-        return 0
-    fi
+    local before_panes after_panes yazi_pane_id
+    before_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
+        | grep -o '"pane_id":"[^"]*"' | sort)
 
-    proc_info=$(herdr pane process-info --pane "$pane_id" 2>/dev/null || true)
-    if ! printf '%s\n' "$proc_info" | grep -q '"name":"nvim"'; then
-        herdr pane run "$pane_id" "NVIM_IDE=1 nvim" >/dev/null 2>&1 || true
-    fi
+    herdr pane split "$pane_id" \
+        --direction right --ratio 0.8 \
+        --cwd "$cwd" --no-focus >/dev/null 2>&1 || true
 
-    # Split on new workspaces, or on re-attach when workspace has only 1 pane (no-agent mode only)
-    if [[ "$is_new" == "true" || ( "$pane_count" -eq 1 && "$has_agent" != "true" ) ]]; then
-        # Orca layout: agent gets 65%, nvim gets 35%
-        # No-agent layout: nvim gets 65%, terminal gets 35%
-        local right_ratio=0.65
-        [[ "$has_agent" == "true" ]] && right_ratio=0.35
+    after_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
+        | grep -o '"pane_id":"[^"]*"' | sort)
 
-        local right_pane_id=""
-        if [[ "$has_agent" == "true" ]]; then
-            # Snapshot pane list before split to identify the new pane afterward
-            local before_panes
-            before_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
-                | grep -o '"pane_id":"[^"]*"' | sort)
+    yazi_pane_id=$(comm -13 \
+        <(printf '%s\n' "$before_panes") \
+        <(printf '%s\n' "$after_panes") \
+        | grep -o '"[^"]*"$' | tr -d '"' | head -1)
 
-            herdr pane split "$pane_id" \
-                --direction right --ratio "$right_ratio" \
-                --cwd "$cwd" --no-focus >/dev/null 2>&1 || true
+    [[ -n "$yazi_pane_id" ]] && \
+        herdr pane run "$yazi_pane_id" "yazi" >/dev/null 2>&1 || true
 
-            local after_panes
-            after_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
-                | grep -o '"pane_id":"[^"]*"' | sort)
-
-            right_pane_id=$(comm -13 \
-                <(printf '%s\n' "$before_panes") \
-                <(printf '%s\n' "$after_panes") \
-                | grep -o '"[^"]*"$' | tr -d '"' | head -1)
-        else
-            herdr pane split "$pane_id" \
-                --direction right --ratio "$right_ratio" \
-                --cwd "$cwd" --no-focus >/dev/null 2>&1 || true
-        fi
-
-        # No-agent mode: add terminal below nvim (VSCode style)
-        # Agent mode: skip — agent pane IS the terminal (Orca style, 2-pane)
-        if [[ "$has_agent" != "true" ]]; then
-            herdr pane split "$pane_id" \
-                --direction down --ratio 0.6 \
-                --cwd "$cwd" --no-focus >/dev/null 2>&1 || true
-        fi
-
-        if [[ "$has_agent" == "true" && -n "$right_pane_id" ]]; then
-            printf '%s\n' "$right_pane_id"
-        fi
-    fi
+    printf '%s\n' "$pane_id"
 }
 
 # Start claude in an existing pane.
@@ -289,16 +252,14 @@ start_agent() {
 # ─── Subcommands ───────────────────────────────────────────
 
 cmd_worktree() {
-    local branch="" project_arg="" agent_flag=true  # default: agent on
+    local branch="" project_arg=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --project)  project_arg="$2"; shift 2 ;;
-            --agent)    agent_flag=true;  shift   ;;
-            --no-agent) agent_flag=false; shift   ;;
             -*)
                 echo "Unknown flag: $1" >&2
-                echo "Usage: copse worktree <branch> [--project PATH] [--no-agent]" >&2
+                echo "Usage: copse worktree <branch> [--project PATH]" >&2
                 exit 1
                 ;;
             *) branch="$1"; shift ;;
@@ -306,7 +267,7 @@ cmd_worktree() {
     done
 
     if [[ -z "$branch" ]]; then
-        echo "Usage: copse worktree <branch-name> [--project PATH] [--no-agent]" >&2
+        echo "Usage: copse worktree <branch-name> [--project PATH]" >&2
         exit 1
     fi
 
@@ -359,13 +320,9 @@ cmd_worktree() {
     local is_new="false"
     [[ "$open_state" == "created" ]] && is_new="true"
 
-    if [[ "$agent_flag" == true ]]; then
-        local agent_pane_id
-        agent_pane_id=$(start_nvim_if_possible "$workspace_id" "$is_new" "$worktree_path" "true")
-        start_agent "$agent_pane_id"
-    else
-        start_nvim_if_possible "$workspace_id" "$is_new" "$worktree_path" "false"
-    fi
+    local agent_pane_id
+    agent_pane_id=$(start_agent_layout "$workspace_id" "$is_new" "$worktree_path")
+    start_agent "$agent_pane_id"
 
     exec herdr
 }
@@ -430,7 +387,7 @@ cmd_fan() {
         branches+=("$branch")
 
         local agent_pane_id
-        agent_pane_id=$(start_nvim_if_possible "$workspace_id" "true" "$worktree_path" "true")
+        agent_pane_id=$(start_agent_layout "$workspace_id" "true" "$worktree_path")
 
         if [[ -n "$agent_pane_id" ]]; then
             # Pass task as CLI arg; --permission-mode overrides defaultMode:plan without
@@ -475,12 +432,10 @@ case "${1:-}" in
     fan)      shift; cmd_fan "$@";      exit $? ;;
 esac
 
-# Parse args: copse [path] [--agent]
-ide_agent_flag=false
+# Parse args: copse [path]
 selected_arg=""
 for arg in "$@"; do
     case "$arg" in
-        --agent) ide_agent_flag=true ;;
         --*)
             echo "Unknown flag: $arg" >&2
             exit 1
@@ -526,12 +481,8 @@ if [[ "$workspace_state" == "created" || "$workspace_state" == "existing" ]]; th
     is_new="false"
     [[ "$workspace_state" == "created" ]] && is_new="true"
 
-    if [[ "$ide_agent_flag" == true ]]; then
-        agent_pane_id=$(start_nvim_if_possible "$workspace_id" "$is_new" "$selected" "true")
-        start_agent "$agent_pane_id"
-    else
-        start_nvim_if_possible "$workspace_id" "$is_new" "$selected" "false"
-    fi
+    agent_pane_id=$(start_agent_layout "$workspace_id" "$is_new" "$selected")
+    start_agent "$agent_pane_id"
 fi
 
 exec herdr

@@ -1,0 +1,12 @@
+[opener]
+edit = [
+  { run = 'copse-open "%s"', orphan = true, desc = "Open in herdr tab" },
+]
+
+[open]
+rules = [
+  { mime = "text/*",           use = "edit" },
+  { mime = "application/json", use = "edit" },
+  { mime = "application/toml", use = "edit" },
+  { mime = "application/xml",  use = "edit" },
+]

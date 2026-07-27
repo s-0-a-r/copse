@@ -1,0 +1,27 @@
+#!/bin/bash
+# Open a file from yazi in a new herdr tab with nvim.
+
+FILE="$1"
+[[ -z "$FILE" ]] && exit 0
+
+DIR="$(dirname "$FILE")"
+LABEL="$(basename "$FILE")"
+
+PANE_INFO=$(herdr pane current 2>/dev/null || true)
+WORKSPACE_ID=$(printf '%s\n' "$PANE_INFO" \
+    | grep -o '"workspace_id":"[^"]*"' | cut -d'"' -f4)
+[[ -z "$WORKSPACE_ID" ]] && exit 0
+
+TAB_RESULT=$(herdr tab create \
+    --workspace "$WORKSPACE_ID" \
+    --cwd "$DIR" \
+    --label "$LABEL" \
+    --focus 2>/dev/null || true)
+
+PANE_ID=$(printf '%s\n' "$TAB_RESULT" \
+    | grep -o '"pane_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+[[ -z "$PANE_ID" ]] && exit 0
+
+# No NVIM_IDE=1: opens file directly, no neotree/dashboard auto-open
+ESCAPED=$(printf '%s' "$FILE" | sed "s/'/'\\\\''/g")
+herdr pane run "$PANE_ID" "nvim '$ESCAPED'" >/dev/null 2>&1 || true

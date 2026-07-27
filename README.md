@@ -49,34 +49,34 @@ Worktrees are always placed under `$IDE_PROJECTS_DIR/.worktrees/<repo>/<branch>/
 ```bash
 copse                    # pick from ~/projects (includes worktrees) via fzf
 copse .                  # open current directory
-copse ~/my-app           # open a specific directory
-copse ~/my-app --agent   # open with a Claude Code agent pane
+copse ~/my-app           # open a project
 ```
 
-### Agent Development (Orca-style)
+### Agent Development
 
 ```bash
-# Open a branch as an isolated worktree workspace (agent starts by default)
+# Open a branch as an isolated worktree workspace
 copse worktree feature/my-branch --project ~/my-app
-copse worktree feature/my-branch --project ~/my-app --no-agent  # editor only
 
 # Fan out N parallel agents on the same task
 copse fan "Add OAuth2 login" --count 3
 copse fan "Refactor auth module" --count 2 --project ~/my-app
 ```
 
-The `fan` command creates N isolated git worktrees, starts Neovim + Claude Code in each, and injects the task prompt automatically. Agents work in parallel; compare results with `git diff`.
+The `fan` command creates N isolated git worktrees, starts Claude Code + yazi in each, and injects the task prompt automatically. Agents work in parallel; compare results with `git diff`.
+
+To open a file from yazi in a new herdr tab, press `Enter` — this runs `copse-open` which creates a new tab with nvim.
 
 > **Note:** copse requires the herdr TUI to be running before use. Start herdr first, then run copse from any terminal.
 
 ## Layout
 
-| Mode | Panes | Description |
+| Tab | Panes | Purpose |
 |---|---|---|
-| No agent | nvim (65%) \| terminal (35%) + terminal below | VSCode-style: editor-first |
-| With agent | nvim (35%) \| Claude Code (65%) | Orca-style: agent-first, 2 panes |
+| Tab 1 | Claude Code (80%) \| yazi (20%) | Agent + file tree |
+| Tab 2 (on demand) | nvim (100%) | File viewing — opens automatically from yazi |
 
-In agent mode, the agent pane is the primary actor and also serves as the terminal. No separate shell pane is created.
+Select a file in yazi and press `Enter` to open it in nvim on Tab 2. Close Tab 2 with `:q`.
 
 ## Keybindings
 
@@ -106,9 +106,11 @@ In agent mode, the agent pane is the primary actor and also serves as the termin
 ```
 Terminal emulator (any)
   └─ Herdr (persistent workspaces / tabs / panes)
-       ├─ Neovim pane      — file tree + editor
-       ├─ Terminal pane    — shell
-       └─ Agent pane       — Claude Code (with --agent or fan)
+       ├─ Tab 1
+       │    ├─ Claude Code pane  — agent (large, ~80%)
+       │    └─ yazi pane         — file tree (~20%)
+       └─ Tab 2 (on demand)
+            └─ nvim pane         — file viewer (opened from yazi)
 ```
 
 ## Directory structure
