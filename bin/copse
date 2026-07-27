@@ -238,6 +238,22 @@ start_agent_layout() {
     [[ -n "$tree_pane_id" ]] && \
         herdr pane run "$tree_pane_id" "broot" >/dev/null 2>&1 || true
 
+    # Create editor tab (Tab 2) with persistent nvim server
+    local editor_tab_result nvim_pane_id
+    editor_tab_result=$(herdr tab create \
+        --workspace "$workspace_id" \
+        --cwd "$cwd" \
+        --label "editor" \
+        --no-focus 2>/dev/null || true)
+
+    nvim_pane_id=$(printf '%s\n' "$editor_tab_result" \
+        | grep -o '"pane_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+    [[ -n "$nvim_pane_id" ]] && \
+        herdr pane run "$nvim_pane_id" \
+        "nvim --listen /tmp/copse-nvim-${workspace_id}.sock" \
+        >/dev/null 2>&1 || true
+
     printf '%s\n' "$pane_id"
 }
 
