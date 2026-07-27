@@ -184,7 +184,7 @@ focus_or_create_workspace() {
     echo "$workspace_id created"
 }
 
-# Agent layout: Tab 1 = claude (left, ~80%) + yazi (right, ~20%).
+# Agent layout: Tab 1 = claude (left, ~80%) + broot (right, ~20%).
 # Args: workspace_id, is_new, cwd
 # Stdout: first pane_id when is_new=true (for caller to start claude there)
 start_agent_layout() {
@@ -219,7 +219,7 @@ start_agent_layout() {
     [[ -z "$pane_id" ]] && pane_id=$(json_find_value "$pane_output" "pane_id")
     [[ -z "$pane_id" ]] && return 0
 
-    local before_panes after_panes yazi_pane_id
+    local before_panes after_panes tree_pane_id
     before_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
         | grep -o '"pane_id":"[^"]*"' | sort)
 
@@ -230,13 +230,13 @@ start_agent_layout() {
     after_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
         | grep -o '"pane_id":"[^"]*"' | sort)
 
-    yazi_pane_id=$(comm -13 \
+    tree_pane_id=$(comm -13 \
         <(printf '%s\n' "$before_panes") \
         <(printf '%s\n' "$after_panes") \
         | grep -o '"[^"]*"$' | tr -d '"' | head -1)
 
-    [[ -n "$yazi_pane_id" ]] && \
-        herdr pane run "$yazi_pane_id" "yazi" >/dev/null 2>&1 || true
+    [[ -n "$tree_pane_id" ]] && \
+        herdr pane run "$tree_pane_id" "broot" >/dev/null 2>&1 || true
 
     printf '%s\n' "$pane_id"
 }

@@ -63,9 +63,9 @@ copse fan "Add OAuth2 login" --count 3
 copse fan "Refactor auth module" --count 2 --project ~/my-app
 ```
 
-The `fan` command creates N isolated git worktrees, starts Claude Code + yazi in each, and injects the task prompt automatically. Agents work in parallel; compare results with `git diff`.
+The `fan` command creates N isolated git worktrees, starts Claude Code + broot in each, and injects the task prompt automatically. Agents work in parallel; compare results with `git diff`.
 
-To open a file from yazi in a new herdr tab, press `Enter` — this runs `copse-open` which creates a new tab with nvim.
+To open a file from broot in a new herdr tab, press `Enter` — this runs `copse-open` which creates a new tab with nvim.
 
 > **Note:** copse requires the herdr TUI to be running before use. Start herdr first, then run copse from any terminal.
 
@@ -73,10 +73,10 @@ To open a file from yazi in a new herdr tab, press `Enter` — this runs `copse-
 
 | Tab | Panes | Purpose |
 |---|---|---|
-| Tab 1 | Claude Code (80%) \| yazi (20%) | Agent + file tree |
-| Tab 2 (on demand) | nvim (100%) | File viewing — opens automatically from yazi |
+| Tab 1 | Claude Code (80%) \| broot (20%) | Agent + file tree |
+| Tab 2 (on demand) | nvim (100%) | File viewing — opens automatically from broot |
 
-Select a file in yazi and press `Enter` to open it in nvim on Tab 2. Close Tab 2 with `:q`.
+Select a file in broot and press `Enter` to open it in nvim on Tab 2. Close Tab 2 with `:q`.
 
 ## Keybindings
 
@@ -108,9 +108,9 @@ Terminal emulator (any)
   └─ Herdr (persistent workspaces / tabs / panes)
        ├─ Tab 1
        │    ├─ Claude Code pane  — agent (large, ~80%)
-       │    └─ yazi pane         — file tree (~20%)
+       │    └─ broot pane         — file tree (~20%)
        └─ Tab 2 (on demand)
-            └─ nvim pane         — file viewer (opened from yazi)
+            └─ nvim pane         — file viewer (opened from broot)
 ```
 
 ## Directory structure

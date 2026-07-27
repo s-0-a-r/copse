@@ -1,0 +1,9 @@
+verbs: [
+    {
+        invocation: open_herdr
+        key: enter
+        apply_to: file
+        external: "copse-open {file:space-separated}"
+        leave_broot: false
+    }
+]

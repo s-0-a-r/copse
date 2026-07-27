@@ -65,7 +65,7 @@ install_tools() {
     exit 1
   fi
 
-  local tools=(neovim herdr fzf fd ripgrep yazi)
+  local tools=(neovim herdr fzf fd ripgrep broot)
   for tool in "${tools[@]}"; do
     if command -v "$tool" &>/dev/null; then
       ok "$tool already installed"
@@ -122,12 +122,12 @@ link_configs() {
   backup_and_link "$REPO_DIR/bin/copse" "$HOME/.local/bin/copse" "bin/copse"
   chmod +x "$REPO_DIR/bin/copse"
 
-  # copse-open (yazi file opener)
+  # copse-open (broot file opener)
   backup_and_link "$REPO_DIR/bin/copse-open" "$HOME/.local/bin/copse-open" "bin/copse-open"
   chmod +x "$REPO_DIR/bin/copse-open"
 
-  # yazi
-  backup_and_link "$REPO_DIR/config/yazi" "$HOME/.config/yazi" "yazi/"
+  # broot
+  backup_and_link "$REPO_DIR/config/broot" "$HOME/.config/broot" "broot/"
 
   echo ""
 }
