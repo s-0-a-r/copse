@@ -232,8 +232,8 @@ start_nvim_if_possible() {
         herdr pane run "$pane_id" "NVIM_IDE=1 nvim" >/dev/null 2>&1 || true
     fi
 
-    # Split on new workspaces, or on re-attach when workspace has only 1 pane
-    if [[ "$is_new" == "true" || "$pane_count" -eq 1 ]]; then
+    # Split on new workspaces, or on re-attach when workspace has only 1 pane (no-agent mode only)
+    if [[ "$is_new" == "true" || ( "$pane_count" -eq 1 && "$has_agent" != "true" ) ]]; then
         # Orca layout: agent gets 65%, nvim gets 35%
         # No-agent layout: nvim gets 65%, terminal gets 35%
         local right_ratio=0.65
