@@ -197,11 +197,11 @@ start_nvim_if_possible() {
         return 0
     fi
 
-    local pane_output pane_id pane_text
+    local pane_output pane_ids pane_id pane_count proc_info
     pane_output=$(herdr pane list --workspace "$workspace_id" 2>/dev/null || true)
 
-    # Select first terminal pane — skip agent panes (they have an "agent" key)
-    pane_id=$(printf '%s\n' "$pane_output" \
+    # Collect all terminal pane IDs — skip agent panes (they have an "agent" key)
+    pane_ids=$(printf '%s\n' "$pane_output" \
         | tr '\n' ' ' \
         | sed 's/},{/}\
 {/g' \
@@ -213,10 +213,11 @@ start_nvim_if_possible() {
                     sub(/^"pane_id"[[:space:]]*:[[:space:]]*"/, "", val)
                     sub(/"$/, "", val)
                     print val
-                    exit
                 }
             }
           ')
+    pane_id=$(printf '%s\n' "$pane_ids" | head -1)
+    pane_count=$(printf '%s\n' "$pane_ids" | grep -c .)
 
     if [[ -z "$pane_id" ]]; then
         pane_id=$(json_find_value "$pane_output" "pane_id")
@@ -226,13 +227,13 @@ start_nvim_if_possible() {
         return 0
     fi
 
-    pane_text=$(herdr pane read "$pane_id" --source recent-unwrapped --lines 1 --format text 2>/dev/null || true)
-    if ! printf '%s\n' "$pane_text" | grep -Eq "NVIM_IDE=1 nvim|nvim|NEOVIM"; then
+    proc_info=$(herdr pane process-info --pane "$pane_id" 2>/dev/null || true)
+    if ! printf '%s\n' "$proc_info" | grep -q '"name":"nvim"'; then
         herdr pane run "$pane_id" "NVIM_IDE=1 nvim" >/dev/null 2>&1 || true
     fi
 
-    # Only split on new workspaces to avoid duplicating panes on re-attach
-    if [[ "$is_new" == "true" ]]; then
+    # Split on new workspaces, or on re-attach when workspace has only 1 pane (no-agent mode only)
+    if [[ "$is_new" == "true" || ( "$pane_count" -eq 1 && "$has_agent" != "true" ) ]]; then
         # Orca layout: agent gets 65%, nvim gets 35%
         # No-agent layout: nvim gets 65%, terminal gets 35%
         local right_ratio=0.65
