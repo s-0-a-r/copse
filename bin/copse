@@ -184,19 +184,19 @@ focus_or_create_workspace() {
     echo "$workspace_id created"
 }
 
-# Agent layout: Tab 1 = claude (left, ~80%) + broot (right, ~20%).
+# Agent layout: Tab 1 ("agent") = claude (50%) | nvim (32%) | copse-tree (18%)
 # Args: workspace_id, is_new, cwd
 # Stdout: first pane_id when is_new=true (for caller to start claude there)
 start_agent_layout() {
     local workspace_id="$1"
-    local is_new="${2:-false}"
     local cwd="${3:-}"
 
     [[ -z "$workspace_id" ]] && return 0
-    [[ "$is_new" != "true" ]] && return 0
 
-    local pane_output pane_id
+    local pane_output pane_id pane_count
     pane_output=$(herdr pane list --workspace "$workspace_id" 2>/dev/null || true)
+    pane_count=$(printf '%s\n' "$pane_output" | grep -o '"pane_id"' | wc -l | tr -d ' ')
+    [[ "$pane_count" -gt 1 ]] && return 0
 
     # First non-agent pane
     pane_id=$(printf '%s\n' "$pane_output" \
@@ -219,40 +219,56 @@ start_agent_layout() {
     [[ -z "$pane_id" ]] && pane_id=$(json_find_value "$pane_output" "pane_id")
     [[ -z "$pane_id" ]] && return 0
 
-    local before_panes after_panes tree_pane_id
+    # Rename Tab 1 to "agent"
+    local tab_id
+    tab_id=$(printf '%s\n' "$pane_output" \
+        | grep -o '"tab_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    [[ -n "$tab_id" ]] && herdr tab rename "$tab_id" "agent" >/dev/null 2>&1 || true
+
+    # Split 1: pane_id right at 0.50 → claude (50%) | right-area (50%)
+    local before_panes after_panes nvim_pane_id
     before_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
         | grep -o '"pane_id":"[^"]*"' | sort)
 
     herdr pane split "$pane_id" \
-        --direction right --ratio 0.8 \
+        --direction right --ratio 0.50 \
         --cwd "$cwd" --no-focus >/dev/null 2>&1 || true
 
     after_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
         | grep -o '"pane_id":"[^"]*"' | sort)
 
+    nvim_pane_id=$(comm -13 \
+        <(printf '%s\n' "$before_panes") \
+        <(printf '%s\n' "$after_panes") \
+        | grep -o '"[^"]*"$' | tr -d '"' | head -1)
+
+    [[ -z "$nvim_pane_id" ]] && { printf '%s\n' "$pane_id"; return 0; }
+
+    # Split 2: nvim_pane right at 0.65 → nvim (65% of right) | copse-tree (35% of right)
+    before_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
+        | grep -o '"pane_id":"[^"]*"' | sort)
+
+    herdr pane split "$nvim_pane_id" \
+        --direction right --ratio 0.65 \
+        --cwd "$cwd" --no-focus >/dev/null 2>&1 || true
+
+    after_panes=$(herdr pane list --workspace "$workspace_id" 2>/dev/null \
+        | grep -o '"pane_id":"[^"]*"' | sort)
+
+    local tree_pane_id
     tree_pane_id=$(comm -13 \
         <(printf '%s\n' "$before_panes") \
         <(printf '%s\n' "$after_panes") \
         | grep -o '"[^"]*"$' | tr -d '"' | head -1)
 
-    [[ -n "$tree_pane_id" ]] && \
-        herdr pane run "$tree_pane_id" "broot" >/dev/null 2>&1 || true
-
-    # Create editor tab (Tab 2) with persistent nvim server
-    local editor_tab_result nvim_pane_id
-    editor_tab_result=$(herdr tab create \
-        --workspace "$workspace_id" \
-        --cwd "$cwd" \
-        --label "editor" \
-        --no-focus 2>/dev/null || true)
-
-    nvim_pane_id=$(printf '%s\n' "$editor_tab_result" \
-        | grep -o '"pane_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-    [[ -n "$nvim_pane_id" ]] && \
-        herdr pane run "$nvim_pane_id" \
-        "nvim --listen /tmp/copse-nvim-${workspace_id}.sock" \
+    # Start nvim with socket in nvim_pane (COPSE_NVIM=1 sets copse branding)
+    herdr pane run "$nvim_pane_id" \
+        "COPSE_NVIM=1 nvim --listen /tmp/copse-nvim-${workspace_id}.sock" \
         >/dev/null 2>&1 || true
+
+    # Start copse-tree in tree_pane
+    [[ -n "$tree_pane_id" ]] && \
+        herdr pane run "$tree_pane_id" "copse-tree $cwd" >/dev/null 2>&1 || true
 
     printf '%s\n' "$pane_id"
 }
@@ -340,7 +356,7 @@ cmd_worktree() {
     agent_pane_id=$(start_agent_layout "$workspace_id" "$is_new" "$worktree_path")
     start_agent "$agent_pane_id"
 
-    exec herdr
+    [[ -z "${HERDR_ENV:-}" ]] && exec herdr
 }
 
 cmd_fan() {
@@ -501,4 +517,4 @@ if [[ "$workspace_state" == "created" || "$workspace_state" == "existing" ]]; th
     start_agent "$agent_pane_id"
 fi
 
-exec herdr
+[[ -z "${HERDR_ENV:-}" ]] && exec herdr
