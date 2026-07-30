@@ -12,7 +12,7 @@ vim.g.maplocalleader = "\\"
 local opt = vim.opt
 
 opt.number = true
-opt.relativenumber = true
+opt.relativenumber = false
 opt.signcolumn = "yes"
 opt.cursorline = true
 opt.termguicolors = true
@@ -78,6 +78,9 @@ map("n", "<Esc>", "<cmd>nohlsearch<cr>", { desc = "Clear search highlight" })
 
 -- Terminal mode
 map("t", "<Esc><Esc>", [[<C-\><C-n>]], { desc = "Exit terminal mode" })
+
+vim.g.copse_nvim = vim.env.COPSE_NVIM == "1"
+vim.env.COPSE_NVIM = nil -- prevent child processes (e.g. git commit) from inheriting
 
 -- ==========================================================
 -- Bootstrap lazy.nvim
