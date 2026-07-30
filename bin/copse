@@ -173,7 +173,7 @@ focus_or_create_workspace() {
 
     git_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
 
-    if [[ -n "$git_root" ]]; then
+    if [[ -n "$git_root" ]] && [[ "$force_new" != "true" ]]; then
         open_output=$(herdr worktree open \
             --path "$git_root" \
             --cwd "$cwd" \
@@ -183,18 +183,8 @@ focus_or_create_workspace() {
 
         if printf '%s\n' "$open_output" | grep -q '"already_open":true'; then
             workspace_id=$(json_find_value "$open_output" "workspace_id")
-            if [[ "$force_new" != "true" ]]; then
-                echo "$workspace_id existing"
-                return 0
-            fi
-            echo "Closing workspace $workspace_id for $cwd" >&2
-            herdr workspace close "$workspace_id" >/dev/null 2>&1 || true
-            open_output=$(herdr worktree open \
-                --path "$git_root" \
-                --cwd "$cwd" \
-                --label "$label" \
-                --focus \
-                --json 2>/dev/null || true)
+            echo "$workspace_id existing"
+            return 0
         fi
 
         workspace_id=$(json_find_value "$open_output" "workspace_id")
