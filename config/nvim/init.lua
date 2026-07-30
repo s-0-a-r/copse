@@ -12,7 +12,7 @@ vim.g.maplocalleader = "\\"
 local opt = vim.opt
 
 opt.number = true
-opt.relativenumber = true
+opt.relativenumber = false
 opt.signcolumn = "yes"
 opt.cursorline = true
 opt.termguicolors = true
@@ -79,25 +79,8 @@ map("n", "<Esc>", "<cmd>nohlsearch<cr>", { desc = "Clear search highlight" })
 -- Terminal mode
 map("t", "<Esc><Esc>", [[<C-\><C-n>]], { desc = "Exit terminal mode" })
 
--- ==========================================================
--- IDE mode: auto-open file tree + terminals (NVIM_IDE=1)
--- ==========================================================
-vim.g.is_ide = vim.env.NVIM_IDE == "1"
-vim.env.NVIM_IDE = nil -- prevent child processes (e.g. git commit) from inheriting
-
-if vim.g.is_ide then
-  vim.api.nvim_create_autocmd("VimEnter", {
-    once = true,
-    callback = function()
-      vim.defer_fn(function()
-        -- Build IDE layout (terminals are herdr panes, not nvim windows)
-        vim.cmd("Neotree show filesystem")
-        vim.cmd("wincmd l")
-        Snacks.dashboard.open({ buf = 0, win = 0 })
-      end, 200)
-    end,
-  })
-end
+vim.g.copse_nvim = vim.env.COPSE_NVIM == "1"
+vim.env.COPSE_NVIM = nil -- prevent child processes (e.g. git commit) from inheriting
 
 -- ==========================================================
 -- Bootstrap lazy.nvim

@@ -1,0 +1,200 @@
+#!/usr/bin/python3
+import curses
+import os
+import sys
+import subprocess
+
+
+def scan_dir(path, depth):
+    nodes = []
+    try:
+        entries = sorted(
+            os.scandir(path),
+            key=lambda e: (not e.is_dir(follow_symlinks=False), e.name.lower()),
+        )
+        for entry in entries:
+            if entry.name.startswith('.'):
+                continue
+            is_dir = entry.is_dir(follow_symlinks=False)
+            nodes.append({
+                'depth': depth,
+                'name': entry.name,
+                'path': entry.path,
+                'is_dir': is_dir,
+                'expanded': False,
+            })
+    except PermissionError:
+        pass
+    return nodes
+
+
+class FileTree:
+    def __init__(self, root):
+        self.root = os.path.abspath(root)
+        self.nodes = scan_dir(self.root, 0)
+        self.cursor = 0
+        self.scroll = 0
+        self.dirty = True
+        self._last_mouse = (-1, -1)
+
+    def expand(self, idx):
+        node = self.nodes[idx]
+        if not node['is_dir'] or node['expanded']:
+            return
+        node['expanded'] = True
+        children = scan_dir(node['path'], node['depth'] + 1)
+        for i, child in enumerate(children):
+            self.nodes.insert(idx + 1 + i, child)
+        self.dirty = True
+
+    def collapse(self, idx):
+        node = self.nodes[idx]
+        if not node['is_dir'] or not node['expanded']:
+            return
+        node['expanded'] = False
+        depth = node['depth']
+        while idx + 1 < len(self.nodes) and self.nodes[idx + 1]['depth'] > depth:
+            self.nodes.pop(idx + 1)
+        self.dirty = True
+
+    def open_node(self, idx):
+        if not self.nodes:
+            return
+        node = self.nodes[idx]
+        if node['is_dir']:
+            if node['expanded']:
+                self.collapse(idx)
+            else:
+                self.expand(idx)
+        else:
+            subprocess.Popen(
+                ['copse-open', node['path']],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+    def move(self, delta):
+        if not self.nodes:
+            return
+        new = max(0, min(len(self.nodes) - 1, self.cursor + delta))
+        if new != self.cursor:
+            self.cursor = new
+            self.dirty = True
+
+    def draw(self, stdscr):
+        if not self.dirty:
+            return
+        self.dirty = False
+
+        h, w = stdscr.getmaxyx()
+        visible = h - 1
+
+        if self.cursor < self.scroll:
+            self.scroll = self.cursor
+        elif self.cursor >= self.scroll + visible:
+            self.scroll = self.cursor - visible + 1
+
+        stdscr.erase()
+
+        for i in range(visible):
+            idx = self.scroll + i
+            if idx >= len(self.nodes):
+                break
+            node = self.nodes[idx]
+            indent = '  ' * node['depth']
+            if node['is_dir']:
+                icon = '▾ ' if node['expanded'] else '▸ '
+            else:
+                icon = '  '
+            line = f"{indent}{icon}{node['name']}"
+            if len(line) > w - 1:
+                line = line[:w - 2] + '…'
+            if idx == self.cursor:
+                attr = curses.color_pair(1) | curses.A_REVERSE
+            else:
+                attr = curses.color_pair(1)
+            try:
+                stdscr.addstr(i, 0, line.ljust(w - 1)[:w - 1], attr)
+            except curses.error:
+                pass
+
+        status = f" {self.root}  {self.cursor + 1}/{len(self.nodes)}  Enter:open  q:quit"
+        try:
+            stdscr.addstr(h - 1, 0, status[:w - 1], curses.color_pair(1) | curses.A_DIM)
+        except curses.error:
+            pass
+
+        stdscr.refresh()
+
+
+_BUTTON5_PRESSED = getattr(curses, 'BUTTON5_PRESSED', 2 << 24)
+
+
+def main(stdscr):
+    root = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
+
+    curses.start_color()
+    curses.use_default_colors()
+    curses.init_pair(1, -1, -1)  # terminal default fg/bg
+    curses.curs_set(0)
+    curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
+    stdscr.timeout(-1)  # blocking — only wake on input
+
+    tree = FileTree(root)
+
+    while True:
+        tree.draw(stdscr)
+        ch = stdscr.getch()
+
+        if ch in (ord('q'), 27):
+            break
+        elif ch in (curses.KEY_UP, ord('k')):
+            tree.move(-1)
+        elif ch in (curses.KEY_DOWN, ord('j')):
+            tree.move(1)
+        elif ch == curses.KEY_PPAGE:
+            h, _ = stdscr.getmaxyx()
+            tree.move(-(h - 2))
+        elif ch == curses.KEY_NPAGE:
+            h, _ = stdscr.getmaxyx()
+            tree.move(h - 2)
+        elif ch in (ord('l'), curses.KEY_RIGHT):
+            if tree.nodes and tree.nodes[tree.cursor]['is_dir']:
+                tree.expand(tree.cursor)
+        elif ch in (ord('h'), curses.KEY_LEFT):
+            if tree.nodes and tree.nodes[tree.cursor]['is_dir']:
+                tree.collapse(tree.cursor)
+        elif ch in (ord('\n'), curses.KEY_ENTER, 10, 13):
+            tree.open_node(tree.cursor)
+        elif ch == curses.KEY_MOUSE:
+            try:
+                _, mx, my, _, bstate = curses.getmouse()
+                if bstate & curses.BUTTON4_PRESSED:  # scroll up
+                    tree.move(-1)
+                elif bstate & _BUTTON5_PRESSED:  # scroll down (standard)
+                    tree.move(1)
+                elif bstate == curses.REPORT_MOUSE_POSITION:
+                    # herdr maps scroll-down to REPORT_MOUSE_POSITION at a fixed
+                    # position; distinguish from real mouse movement by checking
+                    # whether the cursor cell changed
+                    if (mx, my) == tree._last_mouse:
+                        tree.move(1)
+                    tree._last_mouse = (mx, my)
+                else:
+                    idx = tree.scroll + my
+                    if 0 <= idx < len(tree.nodes):
+                        if bstate & curses.BUTTON1_DOUBLE_CLICKED:
+                            tree.cursor = idx
+                            tree.dirty = True
+                            tree.open_node(idx)
+                        elif bstate & curses.BUTTON1_CLICKED:
+                            tree.cursor = idx
+                            tree.dirty = True
+            except curses.error:
+                pass
+        elif ch == curses.KEY_RESIZE:
+            tree.dirty = True
+
+
+if __name__ == '__main__':
+    curses.wrapper(main)
