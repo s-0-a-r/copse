@@ -28,15 +28,15 @@ json_find_value() {
           '
 }
 
-json_find_workspace_id_for_label() {
+json_find_workspace_id_for_cwd() {
     local json="$1"
-    local label="$2"
+    local cwd="$2"
     printf '%s\n' "$json" \
         | tr '\n' ' ' \
         | sed 's/},{/}\
 {/g' \
-        | awk -v label="$label" '
-            index($0, "\"label\"") && index($0, "\"" label "\"") {
+        | awk -v cwd="$cwd" '
+            index($0, "\"cwd\":\"" cwd "\"") {
               if (match($0, /"workspace_id"[[:space:]]*:[[:space:]]*"[^"]+"/)) {
                 workspace_id = substr($0, RSTART, RLENGTH)
                 sub(/^"workspace_id"[[:space:]]*:[[:space:]]*"/, "", workspace_id)
@@ -168,15 +168,50 @@ detect_project() {
 focus_or_create_workspace() {
     local label="$1"
     local cwd="$2"
-    local workspace_id list_output create_output
+    local force_new="${3:-false}"
+    local workspace_id open_output git_root
 
-    list_output=$(herdr workspace list 2>/dev/null || true)
-    workspace_id=$(json_find_workspace_id_for_label "$list_output" "$label")
+    git_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
 
-    if [[ -n "$workspace_id" ]]; then
-        herdr workspace focus "$workspace_id" >/dev/null 2>&1 || true
-        echo "$workspace_id existing"
+    if [[ -n "$git_root" ]]; then
+        open_output=$(herdr worktree open \
+            --path "$git_root" \
+            --cwd "$cwd" \
+            --label "$label" \
+            --focus \
+            --json 2>/dev/null || true)
+
+        if printf '%s\n' "$open_output" | grep -q '"already_open":true'; then
+            workspace_id=$(json_find_value "$open_output" "workspace_id")
+            if [[ "$force_new" != "true" ]]; then
+                echo "$workspace_id existing"
+                return 0
+            fi
+            echo "Closing workspace $workspace_id for $cwd" >&2
+            herdr workspace close "$workspace_id" >/dev/null 2>&1 || true
+            open_output=$(herdr worktree open \
+                --path "$git_root" \
+                --cwd "$cwd" \
+                --label "$label" \
+                --focus \
+                --json 2>/dev/null || true)
+        fi
+
+        workspace_id=$(json_find_value "$open_output" "workspace_id")
+        echo "$workspace_id created"
         return 0
+    fi
+
+    # Non-git: pane list detection + workspace create
+    local pane_output create_output
+    if [[ "$force_new" != "true" ]]; then
+        pane_output=$(herdr pane list 2>/dev/null || true)
+        workspace_id=$(json_find_workspace_id_for_cwd "$pane_output" "$cwd")
+        if [[ -n "$workspace_id" ]]; then
+            herdr workspace focus "$workspace_id" >/dev/null 2>&1 || true
+            echo "$workspace_id existing"
+            return 0
+        fi
     fi
 
     create_output=$(herdr workspace create --cwd "$cwd" --label "$label" --focus 2>/dev/null || true)
@@ -278,7 +313,6 @@ start_agent() {
     local pane_id="$1"
     [[ -z "$pane_id" ]] && return 0
     herdr pane run "$pane_id" "claude" >/dev/null 2>&1 || true
-    printf '%s\n' "$pane_id"
 }
 
 # ─── Subcommands ───────────────────────────────────────────
@@ -462,6 +496,8 @@ ensure_herdr_server
 case "${1:-}" in
     worktree) shift; cmd_worktree "$@"; exit $? ;;
     fan)      shift; cmd_fan "$@";      exit $? ;;
+    new)      shift; force_new="true"  ;;
+    *)        force_new="false"        ;;
 esac
 
 # Parse args: copse [path]
@@ -505,7 +541,7 @@ fi
 
 session_name=$(compute_label "$selected")
 
-workspace_result=$(focus_or_create_workspace "$session_name" "$selected")
+workspace_result=$(focus_or_create_workspace "$session_name" "$selected" "$force_new")
 workspace_id="${workspace_result%% *}"
 workspace_state="${workspace_result#* }"
 
