@@ -65,7 +65,7 @@ install_tools() {
     exit 1
   fi
 
-  local tools=(neovim herdr fzf fd ripgrep broot)
+  local tools=(neovim herdr fzf fd ripgrep jq broot)
   for tool in "${tools[@]}"; do
     if command -v "$tool" &>/dev/null; then
       ok "$tool already installed"
