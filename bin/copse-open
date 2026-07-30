@@ -1,0 +1,14 @@
+#!/bin/bash
+# Open a file from copse-tree in the persistent nvim pane (Tab 1).
+
+FILE="$1"
+[[ -z "$FILE" ]] && exit 0
+
+PANE_INFO=$(herdr pane current 2>/dev/null || true)
+WORKSPACE_ID=$(printf '%s\n' "$PANE_INFO" \
+    | grep -o '"workspace_id":"[^"]*"' | cut -d'"' -f4)
+[[ -z "$WORKSPACE_ID" ]] && exit 0
+
+NVIM_SOCKET="/tmp/copse-nvim-${WORKSPACE_ID}.sock"
+[[ -S "$NVIM_SOCKET" ]] && \
+    nvim --server "$NVIM_SOCKET" --remote "$FILE" 2>/dev/null || true

@@ -34,7 +34,7 @@ return {
               vim.cmd("enew")
             end
             vim.cmd("bdelete! " .. bufnr)
-            if vim.g.is_ide and #bufs == 0 then
+            if #bufs == 0 then
               Snacks.dashboard.open({ buf = 0, win = 0 })
             end
           end,
