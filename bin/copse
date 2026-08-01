@@ -694,6 +694,109 @@ cmd_diff() {
     git -C "$git_root" diff "$target_branch1..$target_branch2"
 }
 
+cmd_clean() {
+    local project_arg="" force="false" dry_run="false"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project) project_arg="$2"; shift 2 ;;
+            --force)   force="true";    shift ;;
+            --dry-run) dry_run="true";  shift ;;
+            -*)
+                echo "Unknown flag: $1" >&2
+                echo "Usage: copse clean [--force] [--dry-run] [--project PATH]" >&2
+                exit 1
+                ;;
+            *)
+                echo "Unknown argument: $1" >&2
+                echo "Usage: copse clean [--force] [--dry-run] [--project PATH]" >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    local git_root
+    git_root=$(detect_project "$project_arg") || exit 1
+
+    local -a target_slots=()
+    local -a target_branches=()
+    local -a target_paths=()
+    local -a target_statuses=()
+    local -a target_wids=()
+
+    local skipped_count=0
+
+    local slot branch path status pane_id workspace_id
+    while IFS=$'\t' read -r slot branch path status pane_id workspace_id; do
+        [[ -z "$branch" ]] && continue
+        local display_status="$status"
+        [[ "$status" == "none" ]] && display_status="(no agent)"
+
+        if [[ "$force" == "true" ]] || [[ "$status" == "idle" ]] || [[ "$status" == "unknown" ]] || [[ "$status" == "none" ]]; then
+            target_slots+=("$slot")
+            target_branches+=("$branch")
+            target_paths+=("$path")
+            target_statuses+=("$display_status")
+            target_wids+=("$workspace_id")
+        else
+            (( skipped_count++ )) || true
+        fi
+    done < <(list_worktrees_with_status "$git_root" "true")
+
+    if [[ ${#target_branches[@]} -eq 0 ]]; then
+        if [[ "$skipped_count" -gt 0 ]]; then
+            echo "No idle fan worktrees to clean ($skipped_count active worktree(s) skipped; use --force to clean all)."
+        else
+            echo "No fan worktrees found to clean."
+        fi
+        exit 0
+    fi
+
+    echo "Fan worktrees to clean:"
+    local i
+    for (( i=0; i<${#target_branches[@]}; i++ )); do
+        printf '  [%s] %-35s (%s)\n' "${target_slots[$i]}" "${target_branches[$i]}" "${target_statuses[$i]}"
+    done
+    if [[ "$skipped_count" -gt 0 ]]; then
+        echo "($skipped_count active worktree(s) skipped; use --force to clean all)"
+    fi
+    echo ""
+
+    if [[ "$dry_run" == "true" ]]; then
+        echo "[dry-run] No changes made."
+        exit 0
+    fi
+
+    if [[ "$force" == "false" ]]; then
+        read -p "Delete ${#target_branches[@]} worktree(s)? [y/N] " confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo "Aborted."
+            exit 0
+        fi
+    fi
+
+    local cleaned_count=0
+    for (( i=0; i<${#target_branches[@]}; i++ )); do
+        local b="${target_branches[$i]}"
+        local p="${target_paths[$i]}"
+        local wid="${target_wids[$i]}"
+
+        if [[ -n "$wid" ]]; then
+            herdr worktree remove --workspace "$wid" --force >/dev/null 2>&1 || true
+            herdr workspace close "$wid" >/dev/null 2>&1 || true
+        fi
+
+        git -C "$git_root" worktree remove --force "$p" >/dev/null 2>&1 || true
+        [[ -d "$p" ]] && rm -rf "$p"
+        git -C "$git_root" branch -D "$b" >/dev/null 2>&1 || true
+        (( cleaned_count++ )) || true
+    done
+
+    git -C "$git_root" worktree prune >/dev/null 2>&1 || true
+
+    echo "Cleaned $cleaned_count fan worktree(s)."
+}
+
 # ─── Entry point ───────────────────────────────────────────
 
 case "${1:-}" in
@@ -704,6 +807,7 @@ Usage: copse [path]
        copse fan "<task>" [--count N] [--project PATH]
        copse ls [--project PATH] [--fan-only]
        copse diff [slot1] [slot2] [--project PATH]
+       copse clean [--force] [--dry-run] [--project PATH]
 
   copse [path]              Open (or focus) a workspace for path.
                             Omit path to pick from fzf.
@@ -717,6 +821,9 @@ Usage: copse [path]
   copse ls                  List worktrees with agent status.
                             --fan-only  Show only fan/* branches.
   copse diff                Compare fan worktrees by slot numbers or fzf.
+  copse clean               Remove idle fan worktrees.
+                            --force    Remove all fan worktrees regardless of status.
+                            --dry-run  Preview worktrees to remove without deleting.
 
 Options:
   -h, --help                Show this help.
@@ -731,6 +838,7 @@ case "${1:-}" in
     fan)         shift; cmd_fan "$@";      exit $? ;;
     ls)          shift; cmd_ls "$@";       exit $? ;;
     diff)        shift; cmd_diff "$@";     exit $? ;;
+    clean)       shift; cmd_clean "$@";    exit $? ;;
     new)         shift; force_new="true"  ;;
     *)           force_new="false"        ;;
 esac
