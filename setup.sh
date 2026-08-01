@@ -122,9 +122,14 @@ link_configs() {
   backup_and_link "$REPO_DIR/bin/copse" "$HOME/.local/bin/copse" "bin/copse"
   chmod +x "$REPO_DIR/bin/copse"
 
-  # copse-open (broot file opener)
+  # copse-tree (TUI file tree)
+  backup_and_link "$REPO_DIR/bin/copse-tree" "$HOME/.local/bin/copse-tree" "bin/copse-tree"
+  chmod +x "$REPO_DIR/bin/copse-tree"
+
+  # copse-open (file opener)
   backup_and_link "$REPO_DIR/bin/copse-open" "$HOME/.local/bin/copse-open" "bin/copse-open"
   chmod +x "$REPO_DIR/bin/copse-open"
+
 
   # broot
   backup_and_link "$REPO_DIR/config/broot" "$HOME/.config/broot" "broot/"
