@@ -88,9 +88,9 @@ copse clean              # remove idle worktrees (interactive confirmation)
 copse clean --force      # remove all fan worktrees regardless of status
 ```
 
-The `fan` command creates N isolated git worktrees, starts Claude Code + broot in each, and injects the task prompt automatically. Agents work in parallel; compare results with `git diff`.
+The `fan` command creates N isolated git worktrees, starts Claude Code + copse-tree in each, and injects the task prompt automatically. Agents work in parallel; compare results with `git diff`.
 
-To open a file from broot in a new herdr tab, press `Enter` — this runs `copse-open` which creates a new tab with nvim.
+To open a file from copse-tree in a new herdr tab, press `Enter` — this runs `copse-open` which creates a new tab with nvim.
 
 > **Note:** copse requires the herdr TUI to be running before use. Start herdr first, then run copse from any terminal.
 
@@ -98,10 +98,10 @@ To open a file from broot in a new herdr tab, press `Enter` — this runs `copse
 
 | Tab | Panes | Purpose |
 |---|---|---|
-| Tab 1 | Claude Code (80%) \| broot (20%) | Agent + file tree |
-| Tab 2 (on demand) | nvim (100%) | File viewing — opens automatically from broot |
+| Tab 1 | Claude Code (50%) \| nvim (32%) \| copse-tree (18%) | Agent + editor + file tree |
+| Tab 2 (on demand) | nvim (100%) | File viewing — opens automatically from copse-tree |
 
-Select a file in broot and press `Enter` to open it in nvim on Tab 2. Close Tab 2 with `:q`.
+Select a file in copse-tree and press `Enter` to open it in nvim on Tab 2. Close Tab 2 with `:q`.
 
 ## Keybindings
 
@@ -144,10 +144,11 @@ Select a file in broot and press `Enter` to open it in nvim on Tab 2. Close Tab 
 Terminal emulator (any)
   └─ Herdr (persistent workspaces / tabs / panes)
        ├─ Tab 1
-       │    ├─ Claude Code pane  — agent (large, ~80%)
-       │    └─ broot pane         — file tree (~20%)
+       │    ├─ Claude Code pane  — agent (~50%)
+       │    ├─ nvim pane         — editor (~32%)
+       │    └─ copse-tree pane   — file tree (~18%)
        └─ Tab 2 (on demand)
-            └─ nvim pane         — file viewer (opened from broot)
+            └─ nvim pane         — file viewer (opened from copse-tree)
 ```
 
 ## Directory structure
@@ -160,9 +161,12 @@ copse/
 │   │   └── config.toml     # → ~/.config/herdr/config.toml
 │   └── nvim/               # → ~/.config/nvim/
 └── bin/
-    └── copse               # → ~/.local/bin/copse
+    ├── copse               # → ~/.local/bin/copse
+    ├── copse-tree          # → ~/.local/bin/copse-tree
+    └── copse-open          # → ~/.local/bin/copse-open
 ```
 
 ## License
 
 MIT
+
