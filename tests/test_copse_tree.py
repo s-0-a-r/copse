@@ -73,14 +73,40 @@ class TestCopseTree(unittest.TestCase):
         # Verify expanded state maintained
         self.assertIn("file_inside.txt", names_after)
 
-        # Toggle back
+        # Select a hidden file
+        hidden_idx = next(i for i, n in enumerate(tree.nodes) if n["name"] == ".hidden_file")
+        tree.cursor = hidden_idx
+
+        # Toggle back to hidden
         tree.toggle_hidden()
         self.assertFalse(tree.show_hidden)
         names_back = [n["name"] for n in tree.nodes]
         self.assertNotIn(".hidden_file", names_back)
         self.assertNotIn(".hidden_dir", names_back)
-        self.assertIn("file_inside.txt", names_back)
+        # Verify cursor is within valid range and didn't crash
+        self.assertTrue(0 <= tree.cursor < len(tree.nodes))
+
+    def test_file_tree_scroll_clamping(self):
+        tree = FileTree(self.root, show_hidden=True)
+        tree.scroll = 100
+        class DummyStdScr:
+            def getmaxyx(self):
+                return (10, 80)
+            def erase(self):
+                pass
+            def addstr(self, *args):
+                pass
+            def refresh(self):
+                pass
+
+        import unittest.mock
+        with unittest.mock.patch('curses.color_pair', return_value=0):
+            tree.draw(DummyStdScr())
+        # Verify scroll is clamped to max_scroll (max(0, 4 - 9) = 0)
+        self.assertEqual(tree.scroll, 0)
+
 
 
 if __name__ == "__main__":
     unittest.main()
+

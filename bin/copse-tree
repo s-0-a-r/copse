@@ -62,6 +62,7 @@ class FileTree:
     def toggle_hidden(self):
         self.show_hidden = not self.show_hidden
         expanded_paths = {node['path'] for node in self.nodes if node['is_dir'] and node['expanded']}
+        old_cursor = self.cursor
         current_path = self.nodes[self.cursor]['path'] if (self.nodes and self.cursor < len(self.nodes)) else None
 
         def rebuild_nodes(path, depth):
@@ -76,12 +77,14 @@ class FileTree:
 
         self.nodes = rebuild_nodes(self.root, 0)
 
-        new_cursor = 0
+        new_cursor = -1
         if current_path:
             for idx, node in enumerate(self.nodes):
                 if node['path'] == current_path:
                     new_cursor = idx
                     break
+        if new_cursor == -1:
+            new_cursor = old_cursor
         self.cursor = max(0, min(len(self.nodes) - 1, new_cursor)) if self.nodes else 0
         self.dirty = True
 
@@ -117,6 +120,9 @@ class FileTree:
         h, w = stdscr.getmaxyx()
         visible = h - 1
 
+        max_scroll = max(0, len(self.nodes) - visible)
+        self.scroll = min(self.scroll, max_scroll)
+
         if self.cursor < self.scroll:
             self.scroll = self.cursor
         elif self.cursor >= self.scroll + visible:
@@ -146,7 +152,9 @@ class FileTree:
             except curses.error:
                 pass
 
-        status = f" {self.root}  {self.cursor + 1}/{len(self.nodes)}  Enter:open  .:toggle hidden  q:quit"
+        total = len(self.nodes)
+        cur_pos = self.cursor + 1 if total > 0 else 0
+        status = f" {self.root}  {cur_pos}/{total}  Enter:open  .:toggle hidden  q:quit"
         try:
             stdscr.addstr(h - 1, 0, status[:w - 1], curses.color_pair(1) | curses.A_DIM)
         except curses.error:
@@ -158,15 +166,7 @@ class FileTree:
 _BUTTON5_PRESSED = getattr(curses, 'BUTTON5_PRESSED', 2 << 24)
 
 
-def main(stdscr):
-    parser = argparse.ArgumentParser(description="copse-tree file browser")
-    parser.add_argument("path", nargs="?", default=os.getcwd(), help="Root directory path")
-    parser.add_argument("-a", "--all", action="store_true", help="Show hidden files and directories")
-    args = parser.parse_args(sys.argv[1:])
-
-    root = args.path
-    show_hidden = args.all
-
+def main(stdscr, root, show_hidden):
     curses.start_color()
     curses.use_default_colors()
     curses.init_pair(1, -1, -1)  # terminal default fg/bg
@@ -205,6 +205,8 @@ def main(stdscr):
         elif ch == curses.KEY_MOUSE:
             try:
                 _, mx, my, _, bstate = curses.getmouse()
+                h, _ = stdscr.getmaxyx()
+                visible = h - 1
                 if bstate & curses.BUTTON4_PRESSED:  # scroll up
                     tree.move(-1)
                 elif bstate & _BUTTON5_PRESSED:  # scroll down (standard)
@@ -217,15 +219,16 @@ def main(stdscr):
                         tree.move(1)
                     tree._last_mouse = (mx, my)
                 else:
-                    idx = tree.scroll + my
-                    if 0 <= idx < len(tree.nodes):
-                        if bstate & curses.BUTTON1_DOUBLE_CLICKED:
-                            tree.cursor = idx
-                            tree.dirty = True
-                            tree.open_node(idx)
-                        elif bstate & curses.BUTTON1_CLICKED:
-                            tree.cursor = idx
-                            tree.dirty = True
+                    if my < visible:
+                        idx = tree.scroll + my
+                        if 0 <= idx < len(tree.nodes):
+                            if bstate & curses.BUTTON1_DOUBLE_CLICKED:
+                                tree.cursor = idx
+                                tree.dirty = True
+                                tree.open_node(idx)
+                            elif bstate & curses.BUTTON1_CLICKED:
+                                tree.cursor = idx
+                                tree.dirty = True
             except curses.error:
                 pass
         elif ch == curses.KEY_RESIZE:
@@ -233,5 +236,11 @@ def main(stdscr):
 
 
 if __name__ == '__main__':
-    curses.wrapper(main)
+    parser = argparse.ArgumentParser(description="copse-tree file browser")
+    parser.add_argument("path", nargs="?", default=os.getcwd(), help="Root directory path")
+    parser.add_argument("-a", "--all", action="store_true", help="Show hidden files and directories")
+    args = parser.parse_args()
+
+    curses.wrapper(lambda stdscr: main(stdscr, root=args.path, show_hidden=args.all))
+
 

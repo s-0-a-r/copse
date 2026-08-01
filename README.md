@@ -105,6 +105,18 @@ Select a file in broot and press `Enter` to open it in nvim on Tab 2. Close Tab 
 
 ## Keybindings
 
+### copse-tree
+
+| Key | Action |
+|---|---|
+| `j` / `Down` | Move cursor down |
+| `k` / `Up` | Move cursor up |
+| `l` / `Right` | Expand directory |
+| `h` / `Left` | Collapse directory |
+| `.` / `a` | Toggle hidden files/directories |
+| `Enter` | Open selected file in Neovim |
+| `q` / `Esc` | Quit |
+
 ### Neovim
 
 | Key | Action |
