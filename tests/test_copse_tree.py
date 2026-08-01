@@ -112,8 +112,27 @@ class TestCopseTree(unittest.TestCase):
         # Verify scroll is clamped to max_scroll (max(0, 4 - 9) = 0)
         self.assertEqual(tree.scroll, 0)
 
+    def test_cli_argument_parsing(self):
+        import argparse
+        parser = argparse.ArgumentParser(description="copse-tree file browser")
+        parser.add_argument("path", nargs="?", default=os.getcwd(), help="Root directory path")
+        parser.add_argument("-a", "--all", action="store_true", dest="show_hidden", default=True)
+        parser.add_argument("--no-hidden", action="store_false", dest="show_hidden")
+
+        # Default
+        args = parser.parse_args([])
+        self.assertTrue(args.show_hidden)
+
+        # --no-hidden
+        args = parser.parse_args(["--no-hidden"])
+        self.assertFalse(args.show_hidden)
+
+        # --no-hidden -a
+        args = parser.parse_args(["--no-hidden", "-a"])
+        self.assertTrue(args.show_hidden)
 
 
 if __name__ == "__main__":
     unittest.main()
+
 

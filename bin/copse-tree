@@ -147,6 +147,8 @@ class FileTree:
                 attr = curses.color_pair(1) | curses.A_REVERSE
             else:
                 attr = curses.color_pair(1)
+            if node['name'].startswith('.'):
+                attr |= curses.A_DIM
             try:
                 stdscr.addstr(i, 0, line.ljust(w - 1)[:w - 1], attr)
             except curses.error:
@@ -154,7 +156,8 @@ class FileTree:
 
         total = len(self.nodes)
         cur_pos = self.cursor + 1 if total > 0 else 0
-        status = f" {self.root}  {cur_pos}/{total}  Enter:open  .:toggle hidden  q:quit"
+        state_str = "on" if self.show_hidden else "off"
+        status = f" {self.root}  {cur_pos}/{total}  Enter:open  .:toggle hidden({state_str})  q:quit"
         try:
             stdscr.addstr(h - 1, 0, status[:w - 1], curses.color_pair(1) | curses.A_DIM)
         except curses.error:
@@ -238,13 +241,12 @@ def main(stdscr, root, show_hidden):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="copse-tree file browser")
     parser.add_argument("path", nargs="?", default=os.getcwd(), help="Root directory path")
-    parser.add_argument("-a", "--all", action="store_true", default=True, help="Show hidden files and directories (default: True)")
+    parser.add_argument("-a", "--all", action="store_true", dest="show_hidden", default=True, help="Show hidden files and directories (default: True)")
     parser.add_argument("--no-hidden", action="store_false", dest="show_hidden", help="Hide hidden files and directories")
     args = parser.parse_args()
 
-    show_hidden = args.show_hidden if hasattr(args, 'show_hidden') else args.all
+    curses.wrapper(lambda stdscr: main(stdscr, root=args.path, show_hidden=args.show_hidden))
 
-    curses.wrapper(lambda stdscr: main(stdscr, root=args.path, show_hidden=show_hidden))
 
 
 
