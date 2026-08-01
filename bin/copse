@@ -68,6 +68,52 @@ json_find_worktree_path_for_branch() {
           '
 }
 
+# Outputs TAB-separated rows, one worktree per line:
+#   slot \t branch \t path \t agent_status \t pane_id \t workspace_id
+#
+# Sorted: non-fan worktrees first (alphabetically by branch),
+#         then fan worktrees by slot number ascending.
+# agent_status = "none" when no agent workspace is open for this worktree.
+list_worktrees_with_status() {
+    local git_root="$1"
+    local fan_only="${2:-false}"
+
+    local wt_json agent_json
+    wt_json=$(herdr worktree list --cwd "$git_root" --json 2>/dev/null || true)
+    agent_json=$(herdr agent list 2>/dev/null || true)
+
+    [[ -z "$wt_json" ]]    && wt_json='{"result":{"worktrees":[]}}'
+    [[ -z "$agent_json" ]] && agent_json='{"result":{"agents":[]}}'
+
+    jq -r --argjson agents "$agent_json" --arg fan_only "$fan_only" '
+      ($agents.result.agents // [] | map({key: .workspace_id, value: .}) | from_entries) as $agent_map |
+      [
+        .result.worktrees[] |
+        (.branch // "") as $branch_str |
+        select(if $fan_only == "true" then ($branch_str | startswith("fan/")) else true end) |
+        (.open_workspace_id // "") as $wid |
+        ($wid | if . != "" then $agent_map[.] else null end) as $agent |
+        (if ($branch_str | test("^fan/.+-[0-9]+$"))
+         then ($branch_str | match(".+-([0-9]+)$").captures[0].string | tonumber)
+         else -1 end) as $slot_num |
+        {
+          slot:         (if $slot_num >= 0 then ($slot_num | tostring) else "-" end),
+          branch:       (if .branch != null then .branch else "(detached)" end),
+          path:         .path,
+          agent_status: ($agent.agent_status // "none"),
+          pane_id:      ($agent.pane_id // ""),
+          workspace_id: $wid,
+          is_fan:       (if $slot_num >= 0 then 1 else 0 end),
+          slot_num:     $slot_num
+        }
+      ] |
+      sort_by([.is_fan, (if .is_fan == 1 then .slot_num else .branch end)]) |
+      .[] |
+      [.slot, .branch, .path, .agent_status, .pane_id, .workspace_id] |
+      @tsv
+    ' <<< "$wt_json"
+}
+
 # ─── Helpers ───────────────────────────────────────────────
 
 ensure_herdr_server() {
@@ -479,6 +525,44 @@ cmd_fan() {
     done
 }
 
+cmd_ls() {
+    local project_arg="" fan_only="false"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project)   project_arg="$2"; shift 2 ;;
+            --fan-only)  fan_only="true";  shift ;;
+            -*)
+                echo "Unknown flag: $1" >&2
+                echo "Usage: copse ls [--project PATH] [--fan-only]" >&2
+                exit 1
+                ;;
+            *)
+                echo "Unknown argument: $1" >&2
+                echo "Usage: copse ls [--project PATH] [--fan-only]" >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    local git_root
+    git_root=$(detect_project "$project_arg") || exit 1
+
+    printf '%-6s %-40s %-12s %s\n' "SLOT" "BRANCH" "STATUS" "PATH"
+    printf '%s\n' "$(printf '%90s' | tr ' ' '-')"
+
+    local slot branch path status pane_id workspace_id
+    while IFS=$'\t' read -r slot branch path status pane_id workspace_id; do
+        local display_status="$status"
+        [[ "$status" == "none" ]] && display_status="(no agent)"
+        printf '%-6s %-40s %-12s %s\n' \
+            "$slot" \
+            "${branch:0:40}" \
+            "$display_status" \
+            "$path"
+    done < <(list_worktrees_with_status "$git_root" "$fan_only")
+}
+
 # ─── Entry point ───────────────────────────────────────────
 
 case "${1:-}" in
@@ -487,6 +571,7 @@ Usage: copse [path]
        copse new [path]
        copse worktree <branch> [--project PATH]
        copse fan "<task>" [--count N] [--project PATH]
+       copse ls [--project PATH] [--fan-only]
 
   copse [path]              Open (or focus) a workspace for path.
                             Omit path to pick from fzf.
@@ -497,6 +582,8 @@ Usage: copse [path]
                             workspace. Creates the worktree if needed.
   copse fan "<task>"        Spin up N parallel agent workspaces for task
                             on separate branches (default N=3).
+  copse ls                  List worktrees with agent status.
+                            --fan-only  Show only fan/* branches.
 
 Options:
   -h, --help                Show this help.
@@ -509,6 +596,7 @@ ensure_herdr_server
 case "${1:-}" in
     worktree)    shift; cmd_worktree "$@"; exit $? ;;
     fan)         shift; cmd_fan "$@";      exit $? ;;
+    ls)          shift; cmd_ls "$@";       exit $? ;;
     new)         shift; force_new="true"  ;;
     *)           force_new="false"        ;;
 esac
