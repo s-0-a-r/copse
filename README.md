@@ -44,6 +44,17 @@ export IDE_PROJECTS_DIR="$HOME/work"
 
 Worktrees are always placed under `$IDE_PROJECTS_DIR/.worktrees/<repo>/<branch>/`.
 
+## Scope
+
+copse manages the lifecycle of parallel AI agent worktrees: provisioning, observation, and cleanup.
+It deliberately stops at notifying humans; it does not orchestrate agents autonomously.
+
+| Phase | Commands |
+|---|---|
+| Provision | `copse`, `copse --agent`, `copse worktree`, `copse fan` |
+| Observe | `copse ls`, `copse watch` |
+| Act | `copse diff`, `copse clean` |
+
 ## Usage
 
 ```bash
