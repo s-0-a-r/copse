@@ -80,7 +80,7 @@ list_worktrees_with_status() {
 
     local wt_json agent_json
     wt_json=$(herdr worktree list --cwd "$git_root" --json 2>/dev/null || true)
-    agent_json=$(herdr agent list --json 2>/dev/null || true)
+    agent_json=$(herdr agent list 2>/dev/null || true)
 
     [[ -z "$wt_json" ]]    && wt_json='{"result":{"worktrees":[]}}'
     [[ -z "$agent_json" ]] && agent_json='{"result":{"agents":[]}}'
@@ -89,15 +89,16 @@ list_worktrees_with_status() {
       ($agents.result.agents // [] | map({key: .workspace_id, value: .}) | from_entries) as $agent_map |
       [
         .result.worktrees[] |
-        select(if $fan_only == "true" then (.branch | startswith("fan/")) else true end) |
+        (.branch // "") as $branch_str |
+        select(if $fan_only == "true" then ($branch_str | startswith("fan/")) else true end) |
         (.open_workspace_id // "") as $wid |
         ($wid | if . != "" then $agent_map[.] else null end) as $agent |
-        (if (.branch | test("^fan/.+-[0-9]+$"))
-         then (.branch | match(".+-([0-9]+)$").captures[0].string | tonumber)
+        (if ($branch_str | test("^fan/.+-[0-9]+$"))
+         then ($branch_str | match(".+-([0-9]+)$").captures[0].string | tonumber)
          else -1 end) as $slot_num |
         {
           slot:         (if $slot_num >= 0 then ($slot_num | tostring) else "-" end),
-          branch:       .branch,
+          branch:       (if .branch != null then .branch else "(detached)" end),
           path:         .path,
           agent_status: ($agent.agent_status // "none"),
           pane_id:      ($agent.pane_id // ""),
