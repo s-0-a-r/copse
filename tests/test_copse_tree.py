@@ -113,11 +113,7 @@ class TestCopseTree(unittest.TestCase):
         self.assertEqual(tree.scroll, 0)
 
     def test_cli_argument_parsing(self):
-        import argparse
-        parser = argparse.ArgumentParser(description="copse-tree file browser")
-        parser.add_argument("path", nargs="?", default=os.getcwd(), help="Root directory path")
-        parser.add_argument("-a", "--all", action="store_true", dest="show_hidden", default=True)
-        parser.add_argument("--no-hidden", action="store_false", dest="show_hidden")
+        parser = copse_tree.create_parser()
 
         # Default
         args = parser.parse_args([])
@@ -130,6 +126,7 @@ class TestCopseTree(unittest.TestCase):
         # --no-hidden -a
         args = parser.parse_args(["--no-hidden", "-a"])
         self.assertTrue(args.show_hidden)
+
 
 
 if __name__ == "__main__":

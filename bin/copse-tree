@@ -238,14 +238,20 @@ def main(stdscr, root, show_hidden):
             tree.dirty = True
 
 
-if __name__ == '__main__':
+def create_parser():
     parser = argparse.ArgumentParser(description="copse-tree file browser")
     parser.add_argument("path", nargs="?", default=os.getcwd(), help="Root directory path")
     parser.add_argument("-a", "--all", action="store_true", dest="show_hidden", default=True, help="Show hidden files and directories (default: True)")
     parser.add_argument("--no-hidden", action="store_false", dest="show_hidden", help="Hide hidden files and directories")
+    return parser
+
+
+if __name__ == '__main__':
+    parser = create_parser()
     args = parser.parse_args()
 
     curses.wrapper(lambda stdscr: main(stdscr, root=args.path, show_hidden=args.show_hidden))
+
 
 
 
