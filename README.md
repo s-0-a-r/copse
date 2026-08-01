@@ -44,12 +44,24 @@ export IDE_PROJECTS_DIR="$HOME/work"
 
 Worktrees are always placed under `$IDE_PROJECTS_DIR/.worktrees/<repo>/<branch>/`.
 
+## Scope
+
+copse manages the lifecycle of parallel AI agent worktrees: provisioning, observation, and cleanup.
+It deliberately stops at notifying humans; it does not orchestrate agents autonomously.
+
+| Phase | Commands |
+|---|---|
+| Provision | `copse`, `copse new`, `copse worktree`, `copse fan` |
+| Observe | `copse ls`, `copse watch` |
+| Act | `copse diff`, `copse clean` |
+
 ## Usage
 
 ```bash
 copse                    # pick from ~/projects (includes worktrees) via fzf
 copse .                  # open current directory
 copse ~/my-app           # open a project
+copse new ~/my-app       # force-create a new workspace for project
 ```
 
 ### Agent Development
@@ -61,6 +73,19 @@ copse worktree feature/my-branch --project ~/my-app
 # Fan out N parallel agents on the same task
 copse fan "Add OAuth2 login" --count 3
 copse fan "Refactor auth module" --count 2 --project ~/my-app
+
+# Observe fan worktrees and agent status
+copse ls
+copse watch
+
+# Compare fan worktree outputs
+copse diff               # select slots interactively via fzf
+copse diff 1 2           # compare slot 1 vs slot 2
+copse diff 1             # compare default branch vs slot 1
+
+# Clean up idle fan worktrees
+copse clean              # remove idle worktrees (interactive confirmation)
+copse clean --force      # remove all fan worktrees regardless of status
 ```
 
 The `fan` command creates N isolated git worktrees, starts Claude Code + broot in each, and injects the task prompt automatically. Agents work in parallel; compare results with `git diff`.
