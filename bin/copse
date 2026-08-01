@@ -563,6 +563,113 @@ cmd_ls() {
     done < <(list_worktrees_with_status "$git_root" "$fan_only")
 }
 
+cmd_diff() {
+    local project_arg=""
+    local -a slots=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project) project_arg="$2"; shift 2 ;;
+            -*)
+                echo "Unknown flag: $1" >&2
+                echo "Usage: copse diff [slot1] [slot2] [--project PATH]" >&2
+                exit 1
+                ;;
+            *)
+                slots+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    local git_root
+    git_root=$(detect_project "$project_arg") || exit 1
+
+    local main_branch
+    main_branch=$(git -C "$git_root" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+    [[ -z "$main_branch" ]] && main_branch="main"
+
+    local -a fan_lines=()
+    local -a fan_slots=()
+    local -a fan_branches=()
+
+    local slot branch path status pane_id workspace_id
+    while IFS=$'\t' read -r slot branch path status pane_id workspace_id; do
+        [[ -z "$branch" ]] && continue
+        local display_status="$status"
+        [[ "$status" == "none" ]] && display_status="(no agent)"
+        fan_lines+=("[$slot] $branch ($display_status)")
+        fan_slots+=("$slot")
+        fan_branches+=("$branch")
+    done < <(list_worktrees_with_status "$git_root" "true")
+
+    if [[ ${#fan_branches[@]} -eq 0 ]]; then
+        echo "No fan worktrees found" >&2
+        exit 1
+    fi
+
+    local target_branch1="" target_branch2=""
+
+    if [[ ${#slots[@]} -eq 0 ]]; then
+        local selected
+        selected=$(printf '%s\n' "${fan_lines[@]}" | fzf -m --prompt="Select 1 or 2 slots to diff > ")
+        if [[ -z "$selected" ]]; then
+            exit 0
+        fi
+
+        local sel_count
+        sel_count=$(printf '%s\n' "$selected" | wc -l | tr -d ' ')
+
+        if [[ "$sel_count" -eq 1 ]]; then
+            local line1
+            line1=$(printf '%s\n' "$selected" | head -n1)
+            target_branch1="$main_branch"
+            target_branch2=$(printf '%s\n' "$line1" | awk '{print $2}')
+        elif [[ "$sel_count" -ge 2 ]]; then
+            local line1 line2
+            line1=$(printf '%s\n' "$selected" | head -n1)
+            line2=$(printf '%s\n' "$selected" | sed -n '2p')
+            target_branch1=$(printf '%s\n' "$line1" | awk '{print $2}')
+            target_branch2=$(printf '%s\n' "$line2" | awk '{print $2}')
+        fi
+    elif [[ ${#slots[@]} -eq 1 ]]; then
+        local s1="${slots[0]}"
+        target_branch1="$main_branch"
+        local i
+        for (( i=0; i<${#fan_slots[@]}; i++ )); do
+            if [[ "${fan_slots[$i]}" == "$s1" ]]; then
+                target_branch2="${fan_branches[$i]}"
+                break
+            fi
+        done
+        if [[ -z "$target_branch2" ]]; then
+            echo "Slot $s1 not found" >&2
+            exit 1
+        fi
+    else
+        local s1="${slots[0]}" s2="${slots[1]}"
+        local i
+        for (( i=0; i<${#fan_slots[@]}; i++ )); do
+            if [[ "${fan_slots[$i]}" == "$s1" ]]; then
+                target_branch1="${fan_branches[$i]}"
+            fi
+            if [[ "${fan_slots[$i]}" == "$s2" ]]; then
+                target_branch2="${fan_branches[$i]}"
+            fi
+        done
+        if [[ -z "$target_branch1" ]]; then
+            echo "Slot $s1 not found" >&2
+            exit 1
+        fi
+        if [[ -z "$target_branch2" ]]; then
+            echo "Slot $s2 not found" >&2
+            exit 1
+        fi
+    fi
+
+    git -C "$git_root" diff "$target_branch1..$target_branch2"
+}
+
 # ─── Entry point ───────────────────────────────────────────
 
 case "${1:-}" in
@@ -572,6 +679,7 @@ Usage: copse [path]
        copse worktree <branch> [--project PATH]
        copse fan "<task>" [--count N] [--project PATH]
        copse ls [--project PATH] [--fan-only]
+       copse diff [slot1] [slot2] [--project PATH]
 
   copse [path]              Open (or focus) a workspace for path.
                             Omit path to pick from fzf.
@@ -584,6 +692,7 @@ Usage: copse [path]
                             on separate branches (default N=3).
   copse ls                  List worktrees with agent status.
                             --fan-only  Show only fan/* branches.
+  copse diff                Compare fan worktrees by slot numbers or fzf.
 
 Options:
   -h, --help                Show this help.
@@ -597,6 +706,7 @@ case "${1:-}" in
     worktree)    shift; cmd_worktree "$@"; exit $? ;;
     fan)         shift; cmd_fan "$@";      exit $? ;;
     ls)          shift; cmd_ls "$@";       exit $? ;;
+    diff)        shift; cmd_diff "$@";     exit $? ;;
     new)         shift; force_new="true"  ;;
     *)           force_new="false"        ;;
 esac
