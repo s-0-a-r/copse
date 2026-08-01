@@ -699,7 +699,12 @@ cmd_clean() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --project) project_arg="$2"; shift 2 ;;
+            --project)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --project requires a path argument" >&2
+                    exit 1
+                fi
+                project_arg="$2"; shift 2 ;;
             --force)   force="true";    shift ;;
             --dry-run) dry_run="true";  shift ;;
             -*)
@@ -768,7 +773,7 @@ cmd_clean() {
     fi
 
     if [[ "$force" == "false" ]]; then
-        read -p "Delete ${#target_branches[@]} worktree(s)? [y/N] " confirm
+        read -r -p "Delete ${#target_branches[@]} worktree(s)? [y/N] " confirm || confirm=""
         if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
             echo "Aborted."
             exit 0
@@ -787,8 +792,10 @@ cmd_clean() {
         fi
 
         git -C "$git_root" worktree remove --force "$p" >/dev/null 2>&1 || true
-        [[ -d "$p" ]] && rm -rf "$p"
-        git -C "$git_root" branch -D "$b" >/dev/null 2>&1 || true
+        [[ -n "$p" && "$p" != "/" && -d "$p" ]] && rm -rf "$p"
+        if [[ -n "$b" ]]; then
+            git -C "$git_root" branch -D "$b" >/dev/null 2>&1 || true
+        fi
         (( cleaned_count++ )) || true
     done
 
