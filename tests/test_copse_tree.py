@@ -37,7 +37,15 @@ class TestCopseTree(unittest.TestCase):
     def tearDown(self):
         self.test_dir.cleanup()
 
-    def test_scan_dir_default_hides_dotfiles(self):
+    def test_scan_dir_default_shows_dotfiles(self):
+        nodes = scan_dir(self.root, 0)
+        names = [n["name"] for n in nodes]
+        self.assertIn("normal_dir", names)
+        self.assertIn("normal_file.txt", names)
+        self.assertIn(".hidden_dir", names)
+        self.assertIn(".hidden_file", names)
+
+    def test_scan_dir_hide_dotfiles(self):
         nodes = scan_dir(self.root, 0, show_hidden=False)
         names = [n["name"] for n in nodes]
         self.assertIn("normal_dir", names)
@@ -45,13 +53,12 @@ class TestCopseTree(unittest.TestCase):
         self.assertNotIn(".hidden_dir", names)
         self.assertNotIn(".hidden_file", names)
 
-    def test_scan_dir_show_hidden(self):
-        nodes = scan_dir(self.root, 0, show_hidden=True)
-        names = [n["name"] for n in nodes]
-        self.assertIn("normal_dir", names)
-        self.assertIn("normal_file.txt", names)
-        self.assertIn(".hidden_dir", names)
+    def test_file_tree_default_shows_dotfiles(self):
+        tree = FileTree(self.root)
+        names = [n["name"] for n in tree.nodes]
         self.assertIn(".hidden_file", names)
+        self.assertIn(".hidden_dir", names)
+
 
     def test_file_tree_toggle_hidden(self):
         tree = FileTree(self.root, show_hidden=False)

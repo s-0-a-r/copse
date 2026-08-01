@@ -6,7 +6,7 @@ import sys
 import subprocess
 
 
-def scan_dir(path, depth, show_hidden=False):
+def scan_dir(path, depth, show_hidden=True):
     nodes = []
     try:
         entries = sorted(
@@ -30,7 +30,7 @@ def scan_dir(path, depth, show_hidden=False):
 
 
 class FileTree:
-    def __init__(self, root, show_hidden=False):
+    def __init__(self, root, show_hidden=True):
         self.root = os.path.abspath(root)
         self.show_hidden = show_hidden
         self.nodes = scan_dir(self.root, 0, show_hidden=self.show_hidden)
@@ -238,9 +238,13 @@ def main(stdscr, root, show_hidden):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="copse-tree file browser")
     parser.add_argument("path", nargs="?", default=os.getcwd(), help="Root directory path")
-    parser.add_argument("-a", "--all", action="store_true", help="Show hidden files and directories")
+    parser.add_argument("-a", "--all", action="store_true", default=True, help="Show hidden files and directories (default: True)")
+    parser.add_argument("--no-hidden", action="store_false", dest="show_hidden", help="Hide hidden files and directories")
     args = parser.parse_args()
 
-    curses.wrapper(lambda stdscr: main(stdscr, root=args.path, show_hidden=args.all))
+    show_hidden = args.show_hidden if hasattr(args, 'show_hidden') else args.all
+
+    curses.wrapper(lambda stdscr: main(stdscr, root=args.path, show_hidden=show_hidden))
+
 
 
