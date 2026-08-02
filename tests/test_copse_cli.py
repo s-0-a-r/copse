@@ -25,6 +25,12 @@ class TestCopseCLI(unittest.TestCase):
         self.assertIn("--no-hidden", output)
         self.assertIn("-a, --all", output)
 
+    def test_copse_watch_execution_no_fan_slots(self):
+        res = subprocess.run([COPSE_BIN, "watch", "--project", os.getcwd()], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("No active fan slots", res.stdout)
+
+
 
 if __name__ == "__main__":
     unittest.main()

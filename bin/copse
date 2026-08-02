@@ -857,7 +857,15 @@ cmd_watch() {
     done
     echo ""
 
-    trap 'echo -e "\nStopped watching."; kill $(jobs -p) 2>/dev/null || true; exit 0' INT TERM EXIT
+    cleanup() {
+        trap - INT TERM
+        printf '\nStopped watching.\n' >&2
+        local pids
+        pids=$(jobs -p)
+        [[ -n "$pids" ]] && kill $pids 2>/dev/null || true
+        exit 0
+    }
+    trap cleanup INT TERM
 
     for (( i=0; i<${#pane_ids[@]}; i++ )); do
         local s="${slots[$i]}"
@@ -865,16 +873,22 @@ cmd_watch() {
         local pid="${pane_ids[$i]}"
 
         (
-            if herdr agent wait "$pid" --until blocked >/dev/null 2>&1; then
-                printf '\a'
-                echo ""
-                echo "[copse watch] Slot $s ($b) needs attention!"
-                if command -v osascript >/dev/null 2>&1; then
-                    local safe_b
-                    safe_b=$(printf '%s' "$b" | sed 's/"/\\"/g')
-                    osascript -e "display notification \"Slot $s ($safe_b) is waiting for input\" with title \"copse watch\"" 2>/dev/null || true
+            while true; do
+                if herdr agent wait "$pid" --until blocked >/dev/null 2>&1; then
+                    printf '\a'
+                    echo ""
+                    echo "[copse watch] Slot $s ($b) needs attention!"
+                    if command -v osascript >/dev/null 2>&1; then
+                        osascript -e 'on run argv' \
+                                  -e 'display notification (item 1 of argv) with title "copse watch"' \
+                                  -e 'end run' \
+                                  -- "Slot $s ($b) is waiting for input" 2>/dev/null || true
+                    fi
+                    sleep 2
+                else
+                    break
                 fi
-            fi
+            done
         ) &
     done
 
