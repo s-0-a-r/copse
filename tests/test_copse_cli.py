@@ -25,12 +25,39 @@ class TestCopseCLI(unittest.TestCase):
         self.assertIn("--no-hidden", output)
         self.assertIn("-a, --all", output)
 
-    def test_copse_watch_execution_no_fan_slots(self):
-        res = subprocess.run([COPSE_BIN, "watch", "--project", os.getcwd()], capture_output=True, text=True)
+    def test_copse_ls_execution(self):
+        res = subprocess.run([COPSE_BIN, "ls", "--project", os.getcwd()], capture_output=True, text=True)
         self.assertEqual(res.returncode, 0)
-        self.assertIn("No active fan slots", res.stdout)
+        self.assertIn("SLOT", res.stdout)
+        self.assertIn("BRANCH", res.stdout)
+        self.assertIn("STATUS", res.stdout)
+        self.assertIn("PATH", res.stdout)
 
+    def test_copse_ls_fan_only(self):
+        res = subprocess.run([COPSE_BIN, "ls", "--fan-only", "--project", os.getcwd()], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("SLOT", res.stdout)
+
+    def test_copse_clean_dry_run(self):
+        res = subprocess.run([COPSE_BIN, "clean", "--dry-run", "--project", os.getcwd()], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0)
+
+    def test_copse_diff_too_many_args(self):
+        res = subprocess.run([COPSE_BIN, "diff", "1", "2", "3", "--project", os.getcwd()], capture_output=True, text=True)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("Error: copse diff accepts at most 2 slot arguments", res.stderr)
+
+    def test_copse_worktree_missing_branch(self):
+        res = subprocess.run([COPSE_BIN, "worktree"], capture_output=True, text=True)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("Usage: copse worktree", res.stderr)
+
+    def test_copse_fan_missing_task(self):
+        res = subprocess.run([COPSE_BIN, "fan"], capture_output=True, text=True)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("Usage: copse fan", res.stderr)
 
 
 if __name__ == "__main__":
     unittest.main()
+
