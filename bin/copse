@@ -88,7 +88,7 @@ list_worktrees_with_status() {
     jq -r --argjson agents "$agent_json" --arg fan_only "$fan_only" '
       ($agents.result.agents // [] | map({key: .workspace_id, value: .}) | from_entries) as $agent_map |
       [
-        .result.worktrees[] |
+        (.result.worktrees // [])[] |
         (.branch // "") as $branch_str |
         select(if $fan_only == "true" then ($branch_str | startswith("fan/")) else true end) |
         (.open_workspace_id // "") as $wid |
@@ -674,11 +674,14 @@ cmd_diff() {
         local s1="${slots[0]}" s2="${slots[1]}"
         local i
         for (( i=0; i<${#fan_slots[@]}; i++ )); do
-            if [[ "${fan_slots[$i]}" == "$s1" ]]; then
+            if [[ -z "$target_branch1" && "${fan_slots[$i]}" == "$s1" ]]; then
                 target_branch1="${fan_branches[$i]}"
             fi
-            if [[ "${fan_slots[$i]}" == "$s2" ]]; then
+            if [[ -z "$target_branch2" && "${fan_slots[$i]}" == "$s2" ]]; then
                 target_branch2="${fan_branches[$i]}"
+            fi
+            if [[ -n "$target_branch1" && -n "$target_branch2" ]]; then
+                break
             fi
         done
         if [[ -z "$target_branch1" ]]; then
