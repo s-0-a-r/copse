@@ -47,6 +47,25 @@ class TestCopseCLI(unittest.TestCase):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("Error: copse diff accepts at most 2 slot arguments", res.stderr)
 
+    def test_copse_diff_slot_not_found(self):
+        res = subprocess.run([COPSE_BIN, "diff", "999", "--project", os.getcwd()], capture_output=True, text=True)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("Slot 999 not found", res.stderr)
+
+    def test_copse_diff_two_slots_not_found(self):
+        res = subprocess.run([COPSE_BIN, "diff", "1", "999", "--project", os.getcwd()], capture_output=True, text=True)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("Slot 999 not found", res.stderr)
+
+    def test_copse_clean_no_worktrees(self):
+        res = subprocess.run([COPSE_BIN, "clean", "--project", os.getcwd()], input="", capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0)
+
+    def test_copse_watch_no_active_slots(self):
+        res = subprocess.run([COPSE_BIN, "watch", "--project", os.getcwd()], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("No active fan slots with agent panes found to watch.", res.stdout)
+
     def test_copse_worktree_missing_branch(self):
         res = subprocess.run([COPSE_BIN, "worktree"], capture_output=True, text=True)
         self.assertNotEqual(res.returncode, 0)
@@ -60,4 +79,5 @@ class TestCopseCLI(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -82,8 +82,12 @@ list_worktrees_with_status() {
     wt_json=$(herdr worktree list --cwd "$git_root" --json 2>/dev/null || true)
     agent_json=$(herdr agent list 2>/dev/null || true)
 
-    [[ -z "$wt_json" ]]    && wt_json='{"result":{"worktrees":[]}}'
-    [[ -z "$agent_json" ]] && agent_json='{"result":{"agents":[]}}'
+    if ! printf '%s' "$wt_json" | jq -e . >/dev/null 2>&1; then
+        wt_json='{"result":{"worktrees":[]}}'
+    fi
+    if ! printf '%s' "$agent_json" | jq -e . >/dev/null 2>&1; then
+        agent_json='{"result":{"agents":[]}}'
+    fi
 
     jq -r --argjson agents "$agent_json" --arg fan_only "$fan_only" '
       ($agents.result.agents // [] | map({key: .workspace_id, value: .}) | from_entries) as $agent_map |
@@ -96,6 +100,7 @@ list_worktrees_with_status() {
         (if ($branch_str | test("^fan/.+-[0-9]+$"))
          then ($branch_str | match(".+-([0-9]+)$").captures[0].string | tonumber)
          else -1 end) as $slot_num |
+        (if ($branch_str | startswith("fan/")) then 0 else 1 end) as $is_fan |
         {
           slot:         (if $slot_num >= 0 then ($slot_num | tostring) else "-" end),
           branch:       (if .branch != null then .branch else "(detached)" end),
@@ -103,11 +108,11 @@ list_worktrees_with_status() {
           agent_status: ($agent.agent_status // "none"),
           pane_id:      ($agent.pane_id // ""),
           workspace_id: $wid,
-          is_fan:       (if $slot_num >= 0 then 1 else 0 end),
+          is_fan:       $is_fan,
           slot_num:     $slot_num
         }
       ] |
-      sort_by([.is_fan, (if .is_fan == 1 then .slot_num else .branch end)]) |
+      sort_by([.is_fan, (if .is_fan == 0 then (if .slot_num >= 0 then .slot_num else 999999 end) else .branch end)]) |
       .[] |
       [.slot, .branch, .path, .agent_status, .pane_id, .workspace_id] |
       @tsv
@@ -607,6 +612,7 @@ cmd_diff() {
             main_branch=$(git -C "$git_root" rev-parse --abbrev-ref HEAD 2>/dev/null)
         fi
     fi
+    [[ -z "$main_branch" ]] && main_branch="HEAD"
 
     local -a fan_lines=()
     local -a fan_slots=()
