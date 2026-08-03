@@ -804,6 +804,97 @@ cmd_clean() {
     echo "Cleaned $cleaned_count fan worktree(s)."
 }
 
+cmd_watch() {
+    local project_arg=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --project requires a path argument" >&2
+                    exit 1
+                fi
+                project_arg="$2"; shift 2 ;;
+            -*)
+                echo "Unknown flag: $1" >&2
+                echo "Usage: copse watch [--project PATH]" >&2
+                exit 1
+                ;;
+            *)
+                echo "Unknown argument: $1" >&2
+                echo "Usage: copse watch [--project PATH]" >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    local git_root
+    git_root=$(detect_project "$project_arg") || exit 1
+
+    local -a slots=()
+    local -a branches=()
+    local -a pane_ids=()
+
+    local slot branch path status pane_id workspace_id
+    while IFS=$'\t' read -r slot branch path status pane_id workspace_id; do
+        [[ -z "$branch" ]] && continue
+        if [[ -n "$pane_id" ]]; then
+            slots+=("$slot")
+            branches+=("$branch")
+            pane_ids+=("$pane_id")
+        fi
+    done < <(list_worktrees_with_status "$git_root" "true")
+
+    if [[ ${#pane_ids[@]} -eq 0 ]]; then
+        echo "No active fan slots with agent panes found to watch."
+        exit 0
+    fi
+
+    echo "Watching ${#pane_ids[@]} fan slot(s)... (Press Ctrl+C to stop)"
+    local i
+    for (( i=0; i<${#pane_ids[@]}; i++ )); do
+        printf '  [%s] %-35s (pane: %s)\n' "${slots[$i]}" "${branches[$i]}" "${pane_ids[$i]}"
+    done
+    echo ""
+
+    cleanup() {
+        trap - INT TERM
+        printf '\nStopped watching.\n' >&2
+        local pids
+        pids=$(jobs -p)
+        [[ -n "$pids" ]] && kill $pids 2>/dev/null || true
+        exit 0
+    }
+    trap cleanup INT TERM
+
+    for (( i=0; i<${#pane_ids[@]}; i++ )); do
+        local s="${slots[$i]}"
+        local b="${branches[$i]}"
+        local pid="${pane_ids[$i]}"
+
+        (
+            while true; do
+                if herdr agent wait "$pid" --until blocked >/dev/null 2>&1; then
+                    printf '\a'
+                    echo ""
+                    echo "[copse watch] Slot $s ($b) needs attention!"
+                    if command -v osascript >/dev/null 2>&1; then
+                        osascript -e 'on run argv' \
+                                  -e 'display notification (item 1 of argv) with title "copse watch"' \
+                                  -e 'end run' \
+                                  -- "Slot $s ($b) is waiting for input" 2>/dev/null || true
+                    fi
+                    sleep 2
+                else
+                    break
+                fi
+            done
+        ) &
+    done
+
+    wait
+}
+
 # ─── Entry point ───────────────────────────────────────────
 
 case "${1:-}" in
@@ -815,6 +906,7 @@ Usage: copse [path]
        copse ls [--project PATH] [--fan-only]
        copse diff [slot1] [slot2] [--project PATH]
        copse clean [--force] [--dry-run] [--project PATH]
+       copse watch [--project PATH]
 
   copse [path]              Open (or focus) a workspace for path.
                             Omit path to pick from fzf.
@@ -831,6 +923,7 @@ Usage: copse [path]
   copse clean               Remove idle fan worktrees.
                             --force    Remove all fan worktrees regardless of status.
                             --dry-run  Preview worktrees to remove without deleting.
+  copse watch               Watch fan slots and notify when blocked (waiting for input).
 
 Options:
   -h, --help                Show this help.
@@ -846,9 +939,11 @@ case "${1:-}" in
     ls)          shift; cmd_ls "$@";       exit $? ;;
     diff)        shift; cmd_diff "$@";     exit $? ;;
     clean)       shift; cmd_clean "$@";    exit $? ;;
+    watch)       shift; cmd_watch "$@";    exit $? ;;
     new)         shift; force_new="true"  ;;
     *)           force_new="false"        ;;
 esac
+
 
 # Parse args: copse [path]
 selected_arg=""
