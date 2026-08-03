@@ -65,7 +65,7 @@ install_tools() {
     exit 1
   fi
 
-  local tools=(neovim herdr fzf fd ripgrep broot)
+  local tools=(neovim herdr fzf fd ripgrep jq)
   for tool in "${tools[@]}"; do
     if command -v "$tool" &>/dev/null; then
       ok "$tool already installed"
@@ -122,9 +122,14 @@ link_configs() {
   backup_and_link "$REPO_DIR/bin/copse" "$HOME/.local/bin/copse" "bin/copse"
   chmod +x "$REPO_DIR/bin/copse"
 
-  # copse-open (broot file opener)
+  # copse-tree (TUI file tree)
+  backup_and_link "$REPO_DIR/bin/copse-tree" "$HOME/.local/bin/copse-tree" "bin/copse-tree"
+  chmod +x "$REPO_DIR/bin/copse-tree"
+
+  # copse-open (file opener)
   backup_and_link "$REPO_DIR/bin/copse-open" "$HOME/.local/bin/copse-open" "bin/copse-open"
   chmod +x "$REPO_DIR/bin/copse-open"
+
 
   # broot
   backup_and_link "$REPO_DIR/config/broot" "$HOME/.config/broot" "broot/"
@@ -199,7 +204,7 @@ echo "=================================================="
 echo ""
 echo "  Next steps:"
 echo "    1. Restart your terminal (or run: source ~/.zshrc)"
-echo "    2. Run the ide command to select a project"
+echo "    2. Run the copse command to select a project"
 echo "    3. Herdr + Neovim ADE will launch"
 echo ""
 echo "  On first Neovim launch, plugins will be installed"

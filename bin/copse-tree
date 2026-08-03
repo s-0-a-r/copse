@@ -1,11 +1,12 @@
 #!/usr/bin/python3
+import argparse
 import curses
 import os
 import sys
 import subprocess
 
 
-def scan_dir(path, depth):
+def scan_dir(path, depth, show_hidden=True):
     nodes = []
     try:
         entries = sorted(
@@ -13,7 +14,7 @@ def scan_dir(path, depth):
             key=lambda e: (not e.is_dir(follow_symlinks=False), e.name.lower()),
         )
         for entry in entries:
-            if entry.name.startswith('.'):
+            if not show_hidden and entry.name.startswith('.'):
                 continue
             is_dir = entry.is_dir(follow_symlinks=False)
             nodes.append({
@@ -29,9 +30,10 @@ def scan_dir(path, depth):
 
 
 class FileTree:
-    def __init__(self, root):
+    def __init__(self, root, show_hidden=True):
         self.root = os.path.abspath(root)
-        self.nodes = scan_dir(self.root, 0)
+        self.show_hidden = show_hidden
+        self.nodes = scan_dir(self.root, 0, show_hidden=self.show_hidden)
         self.cursor = 0
         self.scroll = 0
         self.dirty = True
@@ -42,7 +44,7 @@ class FileTree:
         if not node['is_dir'] or node['expanded']:
             return
         node['expanded'] = True
-        children = scan_dir(node['path'], node['depth'] + 1)
+        children = scan_dir(node['path'], node['depth'] + 1, show_hidden=self.show_hidden)
         for i, child in enumerate(children):
             self.nodes.insert(idx + 1 + i, child)
         self.dirty = True
@@ -55,6 +57,35 @@ class FileTree:
         depth = node['depth']
         while idx + 1 < len(self.nodes) and self.nodes[idx + 1]['depth'] > depth:
             self.nodes.pop(idx + 1)
+        self.dirty = True
+
+    def toggle_hidden(self):
+        self.show_hidden = not self.show_hidden
+        expanded_paths = {node['path'] for node in self.nodes if node['is_dir'] and node['expanded']}
+        old_cursor = self.cursor
+        current_path = self.nodes[self.cursor]['path'] if (self.nodes and self.cursor < len(self.nodes)) else None
+
+        def rebuild_nodes(path, depth):
+            nodes = scan_dir(path, depth, show_hidden=self.show_hidden)
+            result = []
+            for node in nodes:
+                result.append(node)
+                if node['is_dir'] and node['path'] in expanded_paths:
+                    node['expanded'] = True
+                    result.extend(rebuild_nodes(node['path'], depth + 1))
+            return result
+
+        self.nodes = rebuild_nodes(self.root, 0)
+
+        new_cursor = -1
+        if current_path:
+            for idx, node in enumerate(self.nodes):
+                if node['path'] == current_path:
+                    new_cursor = idx
+                    break
+        if new_cursor == -1:
+            new_cursor = old_cursor
+        self.cursor = max(0, min(len(self.nodes) - 1, new_cursor)) if self.nodes else 0
         self.dirty = True
 
     def open_node(self, idx):
@@ -89,6 +120,9 @@ class FileTree:
         h, w = stdscr.getmaxyx()
         visible = h - 1
 
+        max_scroll = max(0, len(self.nodes) - visible)
+        self.scroll = min(self.scroll, max_scroll)
+
         if self.cursor < self.scroll:
             self.scroll = self.cursor
         elif self.cursor >= self.scroll + visible:
@@ -113,12 +147,17 @@ class FileTree:
                 attr = curses.color_pair(1) | curses.A_REVERSE
             else:
                 attr = curses.color_pair(1)
+            if node['name'].startswith('.'):
+                attr |= curses.A_DIM
             try:
                 stdscr.addstr(i, 0, line.ljust(w - 1)[:w - 1], attr)
             except curses.error:
                 pass
 
-        status = f" {self.root}  {self.cursor + 1}/{len(self.nodes)}  Enter:open  q:quit"
+        total = len(self.nodes)
+        cur_pos = self.cursor + 1 if total > 0 else 0
+        state_str = "on" if self.show_hidden else "off"
+        status = f" {self.root}  {cur_pos}/{total}  Enter:open  .:toggle hidden({state_str})  q:quit"
         try:
             stdscr.addstr(h - 1, 0, status[:w - 1], curses.color_pair(1) | curses.A_DIM)
         except curses.error:
@@ -130,9 +169,7 @@ class FileTree:
 _BUTTON5_PRESSED = getattr(curses, 'BUTTON5_PRESSED', 2 << 24)
 
 
-def main(stdscr):
-    root = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
-
+def main(stdscr, root, show_hidden):
     curses.start_color()
     curses.use_default_colors()
     curses.init_pair(1, -1, -1)  # terminal default fg/bg
@@ -140,7 +177,7 @@ def main(stdscr):
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
     stdscr.timeout(-1)  # blocking — only wake on input
 
-    tree = FileTree(root)
+    tree = FileTree(root, show_hidden=show_hidden)
 
     while True:
         tree.draw(stdscr)
@@ -164,11 +201,15 @@ def main(stdscr):
         elif ch in (ord('h'), curses.KEY_LEFT):
             if tree.nodes and tree.nodes[tree.cursor]['is_dir']:
                 tree.collapse(tree.cursor)
+        elif ch in (ord('.'), ord('a')):
+            tree.toggle_hidden()
         elif ch in (ord('\n'), curses.KEY_ENTER, 10, 13):
             tree.open_node(tree.cursor)
         elif ch == curses.KEY_MOUSE:
             try:
                 _, mx, my, _, bstate = curses.getmouse()
+                h, _ = stdscr.getmaxyx()
+                visible = h - 1
                 if bstate & curses.BUTTON4_PRESSED:  # scroll up
                     tree.move(-1)
                 elif bstate & _BUTTON5_PRESSED:  # scroll down (standard)
@@ -181,20 +222,37 @@ def main(stdscr):
                         tree.move(1)
                     tree._last_mouse = (mx, my)
                 else:
-                    idx = tree.scroll + my
-                    if 0 <= idx < len(tree.nodes):
-                        if bstate & curses.BUTTON1_DOUBLE_CLICKED:
-                            tree.cursor = idx
-                            tree.dirty = True
-                            tree.open_node(idx)
-                        elif bstate & curses.BUTTON1_CLICKED:
-                            tree.cursor = idx
-                            tree.dirty = True
+                    if my < visible:
+                        idx = tree.scroll + my
+                        if 0 <= idx < len(tree.nodes):
+                            if bstate & curses.BUTTON1_DOUBLE_CLICKED:
+                                tree.cursor = idx
+                                tree.dirty = True
+                                tree.open_node(idx)
+                            elif bstate & curses.BUTTON1_CLICKED:
+                                tree.cursor = idx
+                                tree.dirty = True
             except curses.error:
                 pass
         elif ch == curses.KEY_RESIZE:
             tree.dirty = True
 
 
+def create_parser():
+    parser = argparse.ArgumentParser(description="copse-tree file browser")
+    parser.add_argument("path", nargs="?", default=os.getcwd(), help="Root directory path")
+    parser.add_argument("-a", "--all", action="store_true", dest="show_hidden", default=True, help="Show hidden files and directories (default: True)")
+    parser.add_argument("--no-hidden", action="store_false", dest="show_hidden", help="Hide hidden files and directories")
+    return parser
+
+
 if __name__ == '__main__':
-    curses.wrapper(main)
+    parser = create_parser()
+    args = parser.parse_args()
+
+    curses.wrapper(lambda stdscr: main(stdscr, root=args.path, show_hidden=args.show_hidden))
+
+
+
+
+
